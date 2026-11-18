@@ -1,0 +1,26 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Navbar from '../../components/Navbar';
+import ServicesCatalog from '../../components/ServicesCatalog';
+---
+
+<Layout
+  title="Servicios & Experiencias 360° | Hotel Xnox"
+  defaultSede="Sede Surco"
+  defaultItem="Packs de Decoración & Celebraciones"
+  defaultPrice="S/ 90 (Ad-on)"
+>
+  <div class="min-h-screen bg-[#09090B]">
+    <div class="pt-3">
+      <Navbar
+        client:load
+        activeNav="servicios"
+        whatsappSede="Sede Surco"
+        whatsappItem="Packs de Decoración & Celebraciones"
+        whatsappPrice="S/ 90 (Ad-on)"
+      />
+    </div>
+
+    <ServicesCatalog client:load />
+  </div>
+</Layout>

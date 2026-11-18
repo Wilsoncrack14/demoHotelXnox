@@ -1,0 +1,12 @@
+---
+import Layout from '../layouts/Layout.astro';
+import AdminDashboard from '../components/AdminDashboard';
+---
+
+<Layout
+  title="HOTEL XNOX Admin — Gestor de Escenas y Hotspots 360°"
+  hideFloatingButton={true}
+  hideFooter={true}
+>
+  <AdminDashboard client:load />
+</Layout>

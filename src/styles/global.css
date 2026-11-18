@@ -1,0 +1,95 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-obsidian: #09090B;
+    --bg-bento: #121215;
+    --border-subtle: #27272A;
+    --text-primary: #FAFAFA;
+    --text-muted: #A1A1AA;
+    --accent-promo: #E11D48;
+    --accent-whatsapp: #25D366;
+  }
+
+  html {
+    background-color: #09090B;
+    color: #FAFAFA;
+    font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background-color: #09090B;
+    color: #FAFAFA;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+}
+
+/* Apple Dark Mode Glassmorphism Surfaces */
+.glass-navbar {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.36) 0%,
+    rgba(255, 255, 255, 0.24) 50%,
+    rgba(255, 255, 255, 0.30) 100%
+  );
+  backdrop-filter: blur(24px) saturate(200%);
+  -webkit-backdrop-filter: blur(24px) saturate(200%);
+  border: 1px solid rgba(255, 255, 255, 0.45);
+  box-shadow:
+    0 16px 40px -8px rgba(0, 0, 0, 0.6),
+    inset 0 1px 2px rgba(255, 255, 255, 0.45);
+}
+
+.glass-surface {
+  background: rgba(24, 24, 27, 0.76);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.glass-hotspot {
+  background: rgba(28, 28, 34, 0.68);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+.glass-hotspot:hover {
+  background: rgba(42, 42, 52, 0.85);
+  border-color: rgba(255, 255, 255, 0.55);
+}
+
+.bento-card {
+  background: #121215;
+  border: 1px solid #27272A;
+  transition: all 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.bento-card:hover {
+  border-color: rgba(255, 255, 255, 0.24);
+  transform: translateY(-2px);
+  box-shadow: 0 20px 40px -15px rgba(236, 72, 153, 0.15), 0 12px 32px -10px rgba(0, 0, 0, 0.75);
+}
+
+/* Custom subtle scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #09090B;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #27272A;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3F3F46;
+}

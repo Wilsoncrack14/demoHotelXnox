@@ -1,0 +1,52 @@
+---
+import '../styles/global.css';
+import WhatsAppBookingModal from '../components/WhatsAppBookingModal';
+import Footer from '../components/Footer';
+
+interface Props {
+  title?: string;
+  description?: string;
+  defaultSede?: string;
+  defaultItem?: string;
+  defaultPrice?: string;
+  hideFloatingButton?: boolean;
+  hideFooter?: boolean;
+}
+
+const {
+  title = 'HOTEL XNOX — Sensaciones y Privacidad | Tours 360° en Lima',
+  description = 'Explora nuestras 5 sedes en Lima (Surco, Lince, Miraflores, San Borja y Los Olivos), suites temáticas con jacuzzi, sillón tántrico y packs románticos en 360°.',
+  defaultSede = 'Sede Surco',
+  defaultItem = 'Suite Neón Jacuzzi',
+  defaultPrice = 'S/ 180 (4 Horas)',
+  hideFloatingButton = false,
+  hideFooter = false,
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="es" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body class="bg-[#09090B] text-[#FAFAFA] antialiased selection:bg-pink-500 selection:text-white">
+    <slot />
+    {!hideFooter && <Footer client:load />}
+    <WhatsAppBookingModal
+      client:load
+      defaultSede={defaultSede}
+      defaultItem={defaultItem}
+      defaultPrice={defaultPrice}
+      hideFloatingButton={hideFloatingButton}
+    />
+  </body>
+</html>

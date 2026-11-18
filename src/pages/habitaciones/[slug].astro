@@ -1,0 +1,98 @@
+---
+import Layout from '../../layouts/Layout.astro';
+import Navbar from '../../components/Navbar';
+import PanoramaViewer360 from '../../components/PanoramaViewer360';
+import LocationBookingCard from '../../components/LocationBookingCard';
+import { ROOMS, type RoomItem } from '../../data/hotelData';
+
+export function getStaticPaths() {
+  return ROOMS.map((room) => ({
+    params: { slug: room.slug },
+    props: { room },
+  }));
+}
+
+interface Props {
+  room: RoomItem;
+}
+
+const { room } = Astro.props;
+const fullPriceLabel = `${room.priceText} (${room.durationText})`;
+---
+
+<Layout
+  title={`${room.title} — ${room.sedeName} | Tour 360° Hotel Xnox`}
+  defaultSede={room.sedeName}
+  defaultItem={room.title}
+  defaultPrice={fullPriceLabel}
+>
+  <div class="min-h-screen bg-[#09090B] pb-16">
+    <!-- Top Contextual Bar matching detallle habitacion.jpg -->
+    <div class="pt-3">
+      <Navbar
+        client:load
+        variant="entity-detail"
+        backHref={`/sedes/${room.sedeSlug}`}
+        backLabel="Volver al catálogo"
+        detailTitle={`${room.title} — ${room.sedeName}`}
+        priceLabel={fullPriceLabel}
+        whatsappSede={room.sedeName}
+        whatsappItem={room.title}
+        whatsappPrice={fullPriceLabel}
+      />
+    </div>
+
+    <!-- Main 360° Viewport & Thumbnail Carousel -->
+    <main class="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-22 md:pt-24">
+      <PanoramaViewer360
+        client:load
+        entityKey={`habitaciones:${room.slug}`}
+        initialScenes={room.scenes}
+        showThumbnails={true}
+        showCarouselArrows={false}
+      />
+
+      <!-- Bottom Split: Amenities List (Left) + Ambient Fade (Center) + Glassmorphism Booking Card (Right) -->
+      <div class="relative mt-8 mx-auto max-w-[1260px] grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+        <!-- Subtle Center Ambient Image matching detallle habitacion.jpg -->
+        <div class="pointer-events-none hidden lg:block absolute inset-y-0 left-1/3 right-1/3 overflow-hidden opacity-35">
+          <img
+            src={room.ambientImage}
+            alt=""
+            class="w-full h-full object-cover rounded-3xl"
+            style="mask-image: radial-gradient(circle at center, black 25%, transparent 75%); -webkit-mask-image: radial-gradient(circle at center, black 25%, transparent 75%);"
+          />
+        </div>
+
+        <!-- Left: Suite Title & Amenities List -->
+        <div class="lg:col-span-7 relative z-10">
+          <h2 class="text-2xl sm:text-3xl md:text-[38px] font-normal tracking-tight text-[#FAFAFA]">
+            {room.title}
+          </h2>
+
+          <ul class="mt-4 space-y-2.5 text-sm sm:text-base md:text-[17px] text-[#D4D4D8]">
+            {
+              room.amenities.map((amenity) => (
+                <li class="flex items-center gap-3">
+                  <span class="w-1.5 h-1.5 rounded-full bg-white shrink-0" />
+                  <span>{amenity}</span>
+                </li>
+              ))
+            }
+          </ul>
+        </div>
+
+        <!-- Right: Glassmorphism Location & Booking Card -->
+        <div class="lg:col-span-5 flex lg:justify-end relative z-10">
+          <LocationBookingCard
+            client:load
+            primaryTitle={room.address}
+            whatsappSede={room.sedeName}
+            whatsappItem={room.title}
+            whatsappPrice={fullPriceLabel}
+          />
+        </div>
+      </div>
+    </main>
+  </div>
+</Layout>
