@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { SEDES, EMPTY_PLACEHOLDER_IMG } from '../data/hotelData';
-import { fetchSedesFromDb, resolveMediaUrl } from '../lib/supabase';
+import {
+  fetchSedesFromDb,
+  getCachedSedes,
+  resolveMediaUrl,
+  type DbSede,
+} from '../lib/supabase';
 
 interface SedeCardData {
   slug: string;
@@ -9,29 +14,33 @@ interface SedeCardData {
   coverUrl: string;
 }
 
+function mapDbSedes(dbRows: DbSede[]): SedeCardData[] {
+  return dbRows.map((row) => ({
+    slug: row.slug,
+    name: row.nombre,
+    address: row.direccion,
+    coverUrl: row.imagen_portada_url
+      ? resolveMediaUrl(row.imagen_portada_url)
+      : EMPTY_PLACEHOLDER_IMG,
+  }));
+}
+
 export default function SedesCatalogGrid() {
-  const [sedesList, setSedesList] = useState<SedeCardData[]>(
-    SEDES.map((s) => ({
+  const [sedesList, setSedesList] = useState<SedeCardData[]>(() => {
+    const cached = getCachedSedes();
+    if (cached && cached.length > 0) return mapDbSedes(cached);
+    return SEDES.map((s) => ({
       slug: s.slug,
       name: s.name,
       address: s.address,
       coverUrl: EMPTY_PLACEHOLDER_IMG,
-    }))
-  );
+    }));
+  });
 
   useEffect(() => {
     fetchSedesFromDb().then((dbRows) => {
       if (!dbRows || dbRows.length === 0) return;
-      setSedesList(
-        dbRows.map((row) => ({
-          slug: row.slug,
-          name: row.nombre,
-          address: row.direccion,
-          coverUrl: row.imagen_portada_url
-            ? resolveMediaUrl(row.imagen_portada_url)
-            : EMPTY_PLACEHOLDER_IMG,
-        }))
-      );
+      setSedesList(mapDbSedes(dbRows));
     });
   }, []);
 

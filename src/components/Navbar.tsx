@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, ArrowLeft, Sliders } from 'lucide-react';
-import { SEDES, ROOMS } from '../data/hotelData';
+import { ChevronDown, ArrowLeft, Sliders, Menu, X } from 'lucide-react';
+import { SEDES } from '../data/hotelData';
 import { WhatsAppIcon } from './WhatsAppIcon';
 import { triggerWhatsAppModal } from '../data/store';
 
@@ -31,6 +31,7 @@ export default function Navbar({
 }: NavbarProps) {
   const [sedesOpen, setSedesOpen] = useState(false);
   const [roomsOpen, setRoomsOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,6 +39,7 @@ export default function Navbar({
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setSedesOpen(false);
         setRoomsOpen(false);
+        setMobileMenuOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -47,34 +49,20 @@ export default function Navbar({
   if (variant === 'entity-detail') {
     return (
       <header className="fixed top-3 inset-x-0 z-50 w-full px-3 md:px-5">
-        <nav className="glass-navbar w-full rounded-2xl px-4 md:px-8 py-3.5 flex flex-wrap items-center justify-between gap-3">
-          {/* Left: Back Pill */}
-          <a
-            href={backHref}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs md:text-sm text-[#E4E4E7] hover:text-white bg-white/[0.06] hover:bg-white/[0.12] border border-white/15 transition-all"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>{backLabel}</span>
-          </a>
+        <nav className="glass-navbar w-full rounded-2xl px-3.5 sm:px-5 md:px-8 py-2.5 md:py-3.5 flex flex-col md:flex-row md:items-center md:justify-between gap-2 md:gap-4">
+          {/* Row 1 (mobile) / Left+Right (desktop) */}
+          <div className="flex items-center justify-between gap-2 md:contents">
+            {/* Back Pill */}
+            <a
+              href={backHref}
+              className="md:order-1 inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs md:text-sm text-[#E4E4E7] hover:text-white bg-white/[0.08] hover:bg-white/[0.14] border border-white/15 transition-all shrink-0"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{backLabel}</span>
+              <span className="sm:hidden">Volver</span>
+            </a>
 
-          {/* Center: Entity Title */}
-          <h1 className="text-base md:text-[22px] font-medium tracking-tight text-[#FAFAFA] text-center flex-1 truncate px-2">
-            {detailTitle}
-          </h1>
-
-          {/* Right: Rate & WhatsApp CTA */}
-          <div className="flex items-center gap-4">
-            {priceLabel && (
-              <div className="flex items-baseline gap-2 text-sm md:text-base">
-                <span className="font-medium text-[#FAFAFA]">{priceLabel}</span>
-                {oldPriceLabel && (
-                  <span className="text-xs md:text-sm text-[#A1A1AA] line-through">
-                    {oldPriceLabel}
-                  </span>
-                )}
-              </div>
-            )}
-
+            {/* Mobile-only CTA */}
             <button
               type="button"
               onClick={() =>
@@ -84,11 +72,47 @@ export default function Navbar({
                   priceText: whatsappPrice || priceLabel,
                 })
               }
-              className="px-4 md:px-5 py-2 rounded-full bg-white text-[#09090B] font-semibold text-xs md:text-sm inline-flex items-center gap-2 hover:bg-neutral-200 transition-all shadow-md cursor-pointer"
+              className="md:hidden px-3.5 py-1.5 rounded-full bg-white text-[#09090B] font-semibold text-xs inline-flex items-center gap-1.5 hover:bg-neutral-200 transition-all shadow-md cursor-pointer shrink-0"
             >
-              <span>Reservar WhatsApp</span>
-              <WhatsAppIcon className="w-4 h-4 text-[#09090B]" />
+              <span>Reservar</span>
+              <WhatsAppIcon className="w-3.5 h-3.5 text-[#09090B]" />
             </button>
+          </div>
+
+          {/* Row 2 (mobile: Title left + Price right) / Center+Right (desktop) */}
+          <div className="flex items-center justify-between gap-3 pt-1.5 border-t border-white/15 md:pt-0 md:border-t-0 md:contents">
+            <h1 className="md:order-2 md:flex-1 text-sm sm:text-base md:text-[20px] font-medium tracking-tight text-[#FAFAFA] text-left md:text-center truncate">
+              {detailTitle}
+            </h1>
+
+            <div className="md:order-3 flex items-center gap-3 md:gap-4 shrink-0">
+              {priceLabel && (
+                <div className="flex items-baseline gap-1.5 px-2.5 py-0.5 md:px-0 md:py-0 rounded-full bg-black/30 md:bg-transparent text-xs sm:text-sm md:text-base">
+                  <span className="font-semibold md:font-medium text-[#FAFAFA]">{priceLabel}</span>
+                  {oldPriceLabel && (
+                    <span className="hidden sm:inline text-xs md:text-sm text-[#A1A1AA] line-through">
+                      {oldPriceLabel}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Desktop-only CTA */}
+              <button
+                type="button"
+                onClick={() =>
+                  triggerWhatsAppModal({
+                    sede: whatsappSede,
+                    itemTitle: whatsappItem,
+                    priceText: whatsappPrice || priceLabel,
+                  })
+                }
+                className="hidden md:inline-flex px-5 py-2 rounded-full bg-white text-[#09090B] font-semibold text-sm items-center gap-2 hover:bg-neutral-200 transition-all shadow-md cursor-pointer"
+              >
+                <span>Reservar WhatsApp</span>
+                <WhatsAppIcon className="w-4 h-4 text-[#09090B]" />
+              </button>
+            </div>
           </div>
         </nav>
       </header>
@@ -96,14 +120,14 @@ export default function Navbar({
   }
 
   return (
-    <header className="fixed top-4 inset-x-0 z-50 w-full px-4 md:px-6 xl:px-8" ref={dropdownRef}>
-      <nav className="glass-navbar w-full rounded-2xl px-5 md:px-8 xl:px-12 py-3.5 xl:py-4 flex items-center justify-between gap-4">
+    <header className="fixed top-3 sm:top-4 inset-x-0 z-50 w-full px-3 sm:px-4 md:px-6 xl:px-8" ref={dropdownRef}>
+      <nav className="glass-navbar w-full rounded-2xl px-3.5 sm:px-5 md:px-8 xl:px-12 py-2.5 sm:py-3.5 xl:py-4 flex items-center justify-between gap-2 sm:gap-4">
         {/* Left: Brand or Back to Sedes */}
         {variant === 'sede-detail' ? (
           <div className="flex items-center gap-3">
             <a
               href={backHref}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs md:text-sm xl:text-[15px] text-white hover:bg-white/20 bg-white/10 border border-white/25 transition-all"
+              className="inline-flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs md:text-sm xl:text-[15px] text-white hover:bg-white/20 bg-white/10 border border-white/25 transition-all"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
               <span>{backLabel}</span>
@@ -118,7 +142,7 @@ export default function Navbar({
         ) : (
           <a
             href="/"
-            className="text-xl md:text-2xl xl:text-[28px] font-light tracking-[0.12em] text-white hover:opacity-90 transition-opacity whitespace-nowrap drop-shadow-sm"
+            className="text-base sm:text-xl md:text-2xl xl:text-[28px] font-light tracking-[0.12em] text-white hover:opacity-90 transition-opacity whitespace-nowrap drop-shadow-sm"
           >
             HOTEL XNOX
           </a>
@@ -170,57 +194,17 @@ export default function Navbar({
             )}
           </div>
 
-          {/* Habitaciones 360° Dropdown / Link */}
-          <div className="relative">
-            <button
-              type="button"
-              onClick={() => {
-                setRoomsOpen(!roomsOpen);
-                setSedesOpen(false);
-              }}
-              className={`px-3.5 py-1.5 rounded-full inline-flex items-center gap-1.5 transition-all cursor-pointer ${
-                activeNav === 'habitaciones'
-                  ? 'bg-white/10 text-white border border-white/20 font-medium'
-                  : 'hover:text-white'
-              }`}
-            >
-              <span>Habitaciones 360°</span>
-              <ChevronDown className={`w-3.5 h-3.5 opacity-70 transition-transform ${roomsOpen ? 'rotate-180' : ''}`} />
-            </button>
-
-            {roomsOpen && (
-              <div
-                className="absolute left-0 mt-2.5 w-64 rounded-2xl p-2 shadow-2xl z-50"
-                style={{
-                  background: 'rgba(20, 20, 24, 0.94)',
-                  backdropFilter: 'blur(20px)',
-                  border: '1px solid rgba(255, 255, 255, 0.14)',
-                }}
-              >
-                <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-[#A1A1AA] font-medium">
-                  Tours Interactivos 360°
-                </div>
-                {ROOMS.map((r) => (
-                  <a
-                    key={r.slug}
-                    href={`/habitaciones/${r.slug}`}
-                    className="flex items-center justify-between px-3 py-2 rounded-xl text-xs text-[#E4E4E7] hover:bg-white/10 hover:text-white transition-colors"
-                  >
-                    <span className="font-medium">{r.title}</span>
-                    <span className="text-[11px] text-pink-400 font-medium">{r.priceText}</span>
-                  </a>
-                ))}
-                <div className="mt-1 pt-1 border-t border-white/10">
-                  <a
-                    href="/habitaciones"
-                    className="block px-3 py-2 rounded-xl text-xs text-[#A1A1AA] hover:text-white hover:bg-white/5 transition-colors"
-                  >
-                    Ver todo el catálogo →
-                  </a>
-                </div>
-              </div>
-            )}
-          </div>
+          {/* Habitaciones 360° Direct Link */}
+          <a
+            href="/habitaciones"
+            className={`px-4 py-1.5 rounded-full transition-all ${
+              activeNav === 'habitaciones'
+                ? 'bg-white/[0.08] text-white border border-white/20 font-medium'
+                : 'hover:text-white'
+            }`}
+          >
+            Habitaciones 360°
+          </a>
 
           <a
             href="/servicios"
@@ -265,32 +249,116 @@ export default function Navbar({
                 priceText: whatsappPrice,
               })
             }
-            className="px-5 md:px-6 xl:px-7 py-2.5 xl:py-3 rounded-full bg-white text-[#09090B] font-semibold text-xs md:text-sm xl:text-[15px] inline-flex items-center gap-2.5 hover:bg-neutral-100 hover:scale-[1.02] transition-all shadow-lg cursor-pointer"
+            className="px-3.5 sm:px-5 md:px-6 xl:px-7 py-2 sm:py-2.5 xl:py-3 rounded-full bg-white text-[#09090B] font-semibold text-xs md:text-sm xl:text-[15px] inline-flex items-center gap-1.5 sm:gap-2.5 hover:bg-neutral-100 hover:scale-[1.02] transition-all shadow-lg cursor-pointer whitespace-nowrap"
           >
-            <span>Reservar WhatsApp</span>
+            <span className="hidden sm:inline">Reservar WhatsApp</span>
+            <span className="sm:hidden">Reservar</span>
             <WhatsAppIcon className="w-4 h-4 xl:w-5 xl:h-5 text-[#09090B]" />
+          </button>
+
+          <button
+            type="button"
+            aria-label={mobileMenuOpen ? 'Cerrar menú' : 'Abrir menú'}
+            aria-expanded={mobileMenuOpen}
+            onClick={() => setMobileMenuOpen((prev) => !prev)}
+            className="md:hidden p-2 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 text-white transition-all cursor-pointer"
+          >
+            {mobileMenuOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
           </button>
         </div>
       </nav>
 
-      {/* Mobile secondary bar */}
-      <div className="flex md:hidden items-center justify-center gap-2 mt-2 px-3 py-1.5 rounded-xl glass-surface text-xs overflow-x-auto">
-        <a href="/sedes/surco" className="px-2.5 py-1 rounded-full hover:bg-white/10 whitespace-nowrap">
-          Sedes
-        </a>
-        <a href="/habitaciones/suite-neon-jacuzzi" className="px-2.5 py-1 rounded-full hover:bg-white/10 whitespace-nowrap">
-          Habitaciones 360°
-        </a>
-        <a href="/servicios" className="px-2.5 py-1 rounded-full hover:bg-white/10 whitespace-nowrap">
-          Servicios
-        </a>
-        <a href="/promociones" className="px-2.5 py-1 rounded-full hover:bg-white/10 whitespace-nowrap">
-          Promociones
-        </a>
-        <a href="/admin" className="px-2.5 py-1 rounded-full text-pink-400 hover:bg-white/10 whitespace-nowrap">
-          Admin
-        </a>
-      </div>
+      {/* Apple Dark Mode Glassmorphism Mobile Hamburger Menu */}
+      {mobileMenuOpen && (
+        <div
+          className="md:hidden mt-2 rounded-2xl p-3 shadow-2xl space-y-1.5"
+          style={{
+            background: 'rgba(18, 18, 22, 0.94)',
+            backdropFilter: 'blur(24px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(24px) saturate(180%)',
+            border: '1px solid rgba(255, 255, 255, 0.16)',
+          }}
+        >
+          <a
+            href="/sedes"
+            onClick={() => setMobileMenuOpen(false)}
+            className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-colors ${
+              activeNav === 'sedes'
+                ? 'bg-white/12 text-white font-medium'
+                : 'text-[#E4E4E7] hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <span>Sedes</span>
+            <span className="text-[11px] text-[#A1A1AA]">5 en Lima</span>
+          </a>
+
+          <div className="flex flex-wrap gap-1.5 px-2 pb-1">
+            {SEDES.map((s) => (
+              <a
+                key={s.slug}
+                href={`/sedes/${s.slug}`}
+                onClick={() => setMobileMenuOpen(false)}
+                className="px-2.5 py-1 rounded-full bg-white/[0.06] hover:bg-white/15 border border-white/10 text-[11px] text-[#D4D4D8] hover:text-white transition-colors"
+              >
+                {s.shortName}
+              </a>
+            ))}
+          </div>
+
+          <a
+            href="/habitaciones"
+            onClick={() => setMobileMenuOpen(false)}
+            className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-colors ${
+              activeNav === 'habitaciones'
+                ? 'bg-white/12 text-white font-medium'
+                : 'text-[#E4E4E7] hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <span>Habitaciones 360°</span>
+            <span className="text-[11px] text-pink-400">Tours</span>
+          </a>
+
+          <a
+            href="/servicios"
+            onClick={() => setMobileMenuOpen(false)}
+            className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-colors ${
+              activeNav === 'servicios'
+                ? 'bg-white/12 text-white font-medium'
+                : 'text-[#E4E4E7] hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <span>Servicios</span>
+            <span className="text-[11px] text-[#A1A1AA]">Adicionales</span>
+          </a>
+
+          <a
+            href="/promociones"
+            onClick={() => setMobileMenuOpen(false)}
+            className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-colors ${
+              activeNav === 'promociones'
+                ? 'bg-white/12 text-white font-medium'
+                : 'text-[#E4E4E7] hover:bg-white/10 hover:text-white'
+            }`}
+          >
+            <span>Promociones</span>
+            <span className="text-[11px] text-pink-400">Ofertas</span>
+          </a>
+
+          <div className="pt-1.5 mt-1.5 border-t border-white/10">
+            <a
+              href="/admin"
+              onClick={() => setMobileMenuOpen(false)}
+              className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm text-[#D4D4D8] hover:bg-white/10 hover:text-white transition-colors"
+            >
+              <span className="inline-flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-pink-500" />
+                <span>Panel Admin 360°</span>
+              </span>
+              <span className="text-[11px] text-[#A1A1AA]">Gestión</span>
+            </a>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

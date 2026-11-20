@@ -70,6 +70,40 @@ function resolveRouteFromLocation(): { category: PublicEntityCategory; slug: str
   return null;
 }
 
+function resolveBackNav(defaultHref: string, defaultLabel: string): { backHref: string; backLabel: string } {
+  if (typeof window === 'undefined') return { backHref: defaultHref, backLabel: defaultLabel };
+  const fromParam = new URLSearchParams(window.location.search).get('from');
+  let originPath = fromParam && fromParam.startsWith('/') ? fromParam : '';
+
+  if (!originPath && document.referrer) {
+    try {
+      const refUrl = new URL(document.referrer);
+      if (refUrl.origin === window.location.origin) {
+        originPath = refUrl.pathname;
+      }
+    } catch {
+      // ignore invalid referrer
+    }
+  }
+
+  if (originPath.startsWith('/sedes/')) {
+    return { backHref: originPath, backLabel: 'Volver a la sede' };
+  }
+  if (originPath === '/habitaciones') {
+    return { backHref: '/habitaciones', backLabel: 'Volver a habitaciones' };
+  }
+  if (originPath === '/servicios') {
+    return { backHref: '/servicios', backLabel: 'Volver a servicios' };
+  }
+  if (originPath === '/promociones') {
+    return { backHref: '/promociones', backLabel: 'Volver a promociones' };
+  }
+  if (originPath === '/sedes') {
+    return { backHref: '/sedes', backLabel: 'Volver a sedes' };
+  }
+  return { backHref: defaultHref, backLabel: defaultLabel };
+}
+
 async function loadSedeById(sedeId?: string | null): Promise<DbSede | null> {
   if (!supabase || !sedeId) return null;
   const { data } = await supabase.from('sedes').select('*').eq('id', sedeId).maybeSingle();
@@ -136,6 +170,7 @@ export default function PublicEntityDetail({
             const sedeName = dbSede?.nombre || fallbackRoom?.sedeName || 'Sede Surco';
 
             if (active) {
+              const navBack = resolveBackNav('/habitaciones', 'Volver a habitaciones');
               document.title = `${dbRoom.nombre} — ${sedeName} | Tour 360° Hotel Xnox`;
               setEntity({
                 category,
@@ -144,8 +179,8 @@ export default function PublicEntityDetail({
                 title: dbRoom.nombre,
                 subtitle: sedeName,
                 priceLabel,
-                backHref: dbSede?.slug ? `/sedes/${dbSede.slug}` : '/habitaciones',
-                backLabel: 'Volver al catálogo',
+                backHref: navBack.backHref,
+                backLabel: navBack.backLabel,
                 sedeName,
                 sedeSlug: dbSede?.slug || 'surco',
                 address: dbSede?.direccion || 'Av. Benavides 4510, Santiago de Surco',
@@ -163,8 +198,8 @@ export default function PublicEntityDetail({
             return;
           }
 
-          const staticRoom = ROOMS.find((r) => r.slug === slug);
           if (staticRoom && active) {
+            const navBack = resolveBackNav('/habitaciones', 'Volver a habitaciones');
             const scenes = await fetchEscenas360ForEntity(
               'habitacion',
               staticRoom.slug,
@@ -177,8 +212,8 @@ export default function PublicEntityDetail({
               title: staticRoom.title,
               subtitle: staticRoom.sedeName,
               priceLabel: `${staticRoom.priceText} (${staticRoom.durationText})`,
-              backHref: `/sedes/${staticRoom.sedeSlug}`,
-              backLabel: 'Volver al catálogo',
+              backHref: navBack.backHref,
+              backLabel: navBack.backLabel,
               sedeName: staticRoom.sedeName,
               sedeSlug: staticRoom.sedeSlug,
               address: staticRoom.address,
@@ -447,12 +482,69 @@ export default function PublicEntityDetail({
   }, [initialCategory, initialSlug]);
 
   if (loading) {
+    const isSedeRoute =
+      initialCategory === 'sedes' ||
+      (typeof window !== 'undefined' && window.location.pathname.startsWith('/sedes/'));
     return (
-      <div className="min-h-screen bg-[#09090B] flex items-center justify-center px-6">
-        <div className="w-full max-w-[1400px] space-y-6 animate-pulse">
-          <div className="h-12 w-64 rounded-full bg-white/10" />
-          <div className="h-[460px] w-full rounded-[24px] bg-white/5 border border-white/10" />
+      <div className="min-h-screen bg-[#09090B] pb-16 animate-pulse">
+        <div className="fixed top-3 inset-x-0 z-50 w-full px-3 md:px-5">
+          <div
+            className="w-full rounded-2xl px-4 md:px-8 py-3.5 flex items-center justify-between gap-4 border border-white/15"
+            style={{ background: 'rgba(24, 24, 30, 0.72)', backdropFilter: 'blur(18px)' }}
+          >
+            <div className="h-8 w-28 sm:w-36 rounded-full bg-white/10" />
+            <div className="hidden md:block h-6 w-56 rounded-full bg-white/10" />
+            <div className="flex items-center gap-3">
+              <div className="h-6 w-20 rounded-full bg-white/10" />
+              <div className="h-9 w-28 sm:w-36 rounded-full bg-white/15" />
+            </div>
+          </div>
         </div>
+
+        <main className="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-30 sm:pt-26 md:pt-24">
+          {isSedeRoute && (
+            <div className="mx-auto max-w-[1260px] flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
+              <div className="space-y-3">
+                <div className="h-10 sm:h-12 w-64 rounded-2xl bg-white/10" />
+                <div className="h-5 w-80 max-w-full rounded-full bg-white/5" />
+              </div>
+              <div className="h-28 w-full max-w-[390px] rounded-[22px] bg-white/5 border border-white/10" />
+            </div>
+          )}
+
+          <div
+            className={`w-full ${
+              isSedeRoute
+                ? 'h-[260px] sm:h-[310px] md:h-[340px]'
+                : 'h-[300px] sm:h-[420px] md:h-[520px] xl:h-[580px]'
+            } rounded-[24px] border border-[#27272A] bg-[#121216] flex flex-col items-center justify-center gap-3`}
+          >
+            <div className="w-10 h-10 rounded-full border-2 border-pink-500/40 border-t-pink-500 animate-spin" />
+            <div className="h-3.5 w-40 rounded-full bg-white/10" />
+          </div>
+
+          <div className="mt-4 flex items-center gap-2 sm:gap-3 max-w-[1260px] mx-auto overflow-hidden">
+            <div className="shrink-0 w-[calc((100%-16px)/3)] sm:w-[calc((100%-36px)/4)] md:w-[calc((100%-60px)/6)] h-14 sm:h-20 md:h-24 rounded-xl sm:rounded-2xl bg-white/5 border border-white/10" />
+            <div className="shrink-0 w-[calc((100%-16px)/3)] sm:w-[calc((100%-36px)/4)] md:w-[calc((100%-60px)/6)] h-14 sm:h-20 md:h-24 rounded-xl sm:rounded-2xl bg-white/5 border border-white/10" />
+            <div className="shrink-0 w-[calc((100%-16px)/3)] sm:w-[calc((100%-36px)/4)] md:w-[calc((100%-60px)/6)] h-14 sm:h-20 md:h-24 rounded-xl sm:rounded-2xl bg-white/5 border border-white/10" />
+            <div className="hidden sm:block shrink-0 w-[calc((100%-36px)/4)] md:w-[calc((100%-60px)/6)] h-20 md:h-24 rounded-2xl bg-white/5 border border-white/10" />
+          </div>
+
+          <div className="mt-8 mx-auto max-w-[1260px] grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+            <div className="lg:col-span-7 space-y-3">
+              <div className="h-8 sm:h-10 w-72 max-w-full rounded-2xl bg-white/10" />
+              <div className="h-4 w-44 rounded-full bg-white/5" />
+              <div className="pt-2 space-y-2.5">
+                <div className="h-4 w-3/4 rounded-full bg-white/5" />
+                <div className="h-4 w-2/3 rounded-full bg-white/5" />
+                <div className="h-4 w-1/2 rounded-full bg-white/5" />
+              </div>
+            </div>
+            <div className="lg:col-span-5 flex lg:justify-end">
+              <div className="w-full max-w-[390px] h-44 rounded-[22px] bg-white/5 border border-white/10" />
+            </div>
+          </div>
+        </main>
       </div>
     );
   }
@@ -493,7 +585,7 @@ export default function PublicEntityDetail({
           />
         </div>
 
-        <main className="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-24 md:pt-26">
+        <main className="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-28 sm:pt-26 md:pt-26">
           <div className="mx-auto max-w-[1260px] flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
             <div>
               <h1 className="text-4xl sm:text-5xl md:text-[54px] font-normal tracking-tight text-[#FAFAFA] leading-none">
@@ -523,6 +615,7 @@ export default function PublicEntityDetail({
             entidadTipo="habitacion"
             entidadId={entity.id}
             initialScenes={entity.scenes}
+            skipInitialFetch={true}
             showThumbnails={true}
             heightClass="h-[260px] sm:h-[310px] md:h-[340px]"
           />
@@ -531,7 +624,11 @@ export default function PublicEntityDetail({
             <h2 className="text-xl sm:text-2xl md:text-[26px] font-normal text-[#FAFAFA] mb-4">
               Habitaciones en {entity.title}
             </h2>
-            <RoomsCatalogGrid sedeSlug={entity.slug} cardHeightClass="h-[230px] sm:h-[245px]" />
+            <RoomsCatalogGrid
+              sedeId={entity.id}
+              sedeSlug={entity.slug}
+              cardHeightClass="h-[230px] sm:h-[245px]"
+            />
           </section>
         </main>
       </div>
@@ -560,12 +657,13 @@ export default function PublicEntityDetail({
         />
       </div>
 
-      <main className="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-22 md:pt-24">
+      <main className="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-30 sm:pt-26 md:pt-24">
         <TourViewer360
           entityKey={`${entity.category}:${entity.slug}`}
           entidadTipo={entidadTipo}
           entidadId={entity.id}
           initialScenes={entity.scenes}
+          skipInitialFetch={true}
           showThumbnails={true}
           showCarouselArrows={entity.category === 'promociones'}
         />

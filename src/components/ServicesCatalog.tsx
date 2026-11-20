@@ -1,49 +1,59 @@
 import React, { useState, useEffect } from 'react';
 import { RotateCw, ArrowRight } from 'lucide-react';
 import { SERVICES, type ServiceItem } from '../data/hotelData';
-import { fetchServiciosFromDb, resolveMediaUrl } from '../lib/supabase';
+import {
+  fetchServiciosFromDb,
+  getCachedServicios,
+  resolveMediaUrl,
+  type DbServicio,
+} from '../lib/supabase';
 
 const CATEGORIES = ['Todas', 'Jacuzzi', 'Sillón Tántrico', 'Decoraciones', 'Packs'] as const;
 
+function mapDbServicios(dbRows: DbServicio[]): ServiceItem[] {
+  return dbRows.map((row, idx) => {
+    const existing = SERVICES.find((s) => s.slug === row.slug);
+    if (existing) {
+      return {
+        ...existing,
+        title: row.nombre || existing.title,
+        description: row.descripcion || existing.description,
+        priceText: `S/ ${row.tarifa}`,
+        cardImage: row.portada_webp_url ? resolveMediaUrl(row.portada_webp_url) : existing.cardImage,
+      };
+    }
+    return {
+      slug: row.slug,
+      title: row.nombre,
+      category: (row.etiqueta_promo as ServiceItem['category']) || 'Packs',
+      priceText: `S/ ${row.tarifa}`,
+      topBarPriceText: `Desde S/ ${row.tarifa}`,
+      description: row.descripcion,
+      sedesBadges: ['Todas las sedes'],
+      sedesFilter: ['Surco', 'Lince', 'Miraflores', 'San Borja', 'Los Olivos'],
+      availabilityTitle: 'Disponible en Todas las Sedes',
+      address: 'Av. Benavides 4510, Surco',
+      featuredTall: idx === 0,
+      has360Badge: true,
+      cardImage: resolveMediaUrl(row.portada_webp_url || '/images/service-jacuzzi.webp'),
+      amenitiesTitle: 'Equipamiento:',
+      amenities: [row.descripcion],
+      scenes: SERVICES[0].scenes,
+    };
+  });
+}
+
 export default function ServicesCatalog() {
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
-  const [servicesList, setServicesList] = useState<ServiceItem[]>(SERVICES);
+  const [servicesList, setServicesList] = useState<ServiceItem[]>(() => {
+    const cached = getCachedServicios();
+    return cached && cached.length > 0 ? mapDbServicios(cached) : SERVICES;
+  });
 
   useEffect(() => {
     fetchServiciosFromDb().then((dbRows) => {
       if (!dbRows || dbRows.length === 0) return;
-      // Map any custom DB rows while keeping rich template properties if slug matches
-      const mapped: ServiceItem[] = dbRows.map((row, idx) => {
-        const existing = SERVICES.find((s) => s.slug === row.slug);
-        if (existing) {
-          return {
-            ...existing,
-            title: row.nombre || existing.title,
-            description: row.descripcion || existing.description,
-            priceText: `S/ ${row.tarifa}`,
-            cardImage: row.portada_webp_url ? resolveMediaUrl(row.portada_webp_url) : existing.cardImage,
-          };
-        }
-        return {
-          slug: row.slug,
-          title: row.nombre,
-          category: (row.etiqueta_promo as ServiceItem['category']) || 'Packs',
-          priceText: `S/ ${row.tarifa}`,
-          topBarPriceText: `Desde S/ ${row.tarifa}`,
-          description: row.descripcion,
-          sedesBadges: ['Todas las sedes'],
-          sedesFilter: ['Surco', 'Lince', 'Miraflores', 'San Borja', 'Los Olivos'],
-          availabilityTitle: 'Disponible en Todas las Sedes',
-          address: 'Av. Benavides 4510, Surco',
-          featuredTall: idx === 0,
-          has360Badge: true,
-          cardImage: resolveMediaUrl(row.portada_webp_url || '/images/service-jacuzzi.webp'),
-          amenitiesTitle: 'Equipamiento:',
-          amenities: [row.descripcion],
-          scenes: SERVICES[0].scenes,
-        };
-      });
-      if (mapped.length > 0) setServicesList(mapped);
+      setServicesList(mapDbServicios(dbRows));
     });
   }, []);
 
@@ -56,48 +66,39 @@ export default function ServicesCatalog() {
       : servicesList.filter((s) => s.category === selectedCategory);
 
   return (
-    <section className="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-24 md:pt-28 pb-20">
-      {/* Editorial Header & Filter Pill Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-8">
-        <div>
-          <h1 className="text-3xl sm:text-4xl md:text-[44px] font-light uppercase tracking-[-0.01em] text-[#FAFAFA]">
-            SERVICIOS & EXPERIENCIAS
-          </h1>
-          <p className="mt-1.5 text-sm md:text-base text-[#A1A1AA]">
-            Descubre experiencias de entretenimiento y momentos lúdicos en nuestras sedes.
-          </p>
-        </div>
+    <section className="mx-auto w-full max-w-[1440px] px-4 md:px-8 xl:px-10 pt-22 sm:pt-24 md:pt-28 pb-20">
+      {/* Editorial Header matching /habitaciones */}
+      <div className="mb-5 sm:mb-6 pb-5 border-b border-white/10">
+        <span className="inline-block mb-2 text-[11px] uppercase tracking-[0.22em] text-[#A1A1AA]">
+          Experiencias Exclusivas • Tours 360°
+        </span>
+        <h1 className="text-2xl sm:text-4xl md:text-[46px] font-light uppercase tracking-[-0.015em] text-[#FAFAFA] leading-none">
+          SERVICIOS & EXPERIENCIAS
+        </h1>
+        <p className="mt-2 text-xs sm:text-sm md:text-base text-[#A1A1AA] max-w-xl">
+          Descubre experiencias de entretenimiento y momentos lúdicos en nuestras sedes.
+        </p>
+      </div>
 
-        {/* Category Filter Bar matching servicios.jpg */}
-        <div
-          className="inline-flex flex-wrap items-center gap-1 p-1.5 rounded-full self-start lg:self-auto"
-          style={{
-            background: 'rgba(28, 28, 34, 0.85)',
-            border: '1px solid rgba(255, 255, 255, 0.16)',
-          }}
-        >
-          {CATEGORIES.map((cat, idx) => {
-            const isActive = selectedCategory === cat;
-            return (
-              <React.Fragment key={cat}>
-                {idx > 1 && !isActive && selectedCategory !== CATEGORIES[idx - 1] && (
-                  <span className="text-[#71717A] text-xs select-none px-0.5">•</span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setSelectedCategory(cat)}
-                  className={`px-4 py-1.5 rounded-full text-xs md:text-sm transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-white text-[#09090B] font-semibold shadow-sm'
-                      : 'text-[#D4D4D8] hover:text-white'
-                  }`}
-                >
-                  {cat}
-                </button>
-              </React.Fragment>
-            );
-          })}
-        </div>
+      {/* Category Filter Bar matching /habitaciones */}
+      <div className="mb-6 sm:mb-8 flex flex-nowrap sm:flex-wrap items-center gap-2 overflow-x-auto pb-1 sm:pb-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {CATEGORIES.map((cat) => {
+          const isActive = selectedCategory === cat;
+          return (
+            <button
+              key={cat}
+              type="button"
+              onClick={() => setSelectedCategory(cat)}
+              className={`shrink-0 whitespace-nowrap px-4 py-1.5 rounded-full text-xs md:text-sm transition-all cursor-pointer ${
+                isActive
+                  ? 'bg-white text-[#09090B] font-semibold'
+                  : 'bg-[#16161B] border border-white/15 text-[#D4D4D8] hover:text-white hover:bg-white/10 hover:border-white/35'
+              }`}
+            >
+              {cat}
+            </button>
+          );
+        })}
       </div>
 
       {/* Default Asymmetric Bento Layout ("Todas") matching servicios.jpg */}

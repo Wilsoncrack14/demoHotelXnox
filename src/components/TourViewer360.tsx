@@ -34,6 +34,7 @@ export interface TourViewer360Props {
   onSphereClickCoords?: (coords: { pitch: number; yaw: number; xPct: number; yPct: number }) => void;
   onHotspotSelect?: (hs: Hotspot360) => void;
   onCameraAngleChange?: (coords: { pitch: number; yaw: number }) => void;
+  skipInitialFetch?: boolean;
 }
 
 function buildMarkerHtml(hs: Hotspot360, adminInteractive?: boolean): string {
@@ -87,13 +88,14 @@ export default function TourViewer360({
   entidadId,
   showThumbnails = true,
   showCarouselArrows = false,
-  heightClass = 'h-[380px] sm:h-[460px] md:h-[520px] xl:h-[580px]',
+  heightClass = 'h-[300px] sm:h-[420px] md:h-[520px] xl:h-[580px]',
   adminInteractive = false,
   activeSceneIndexOverride,
   onSceneIndexChange,
   onSphereClickCoords,
   onHotspotSelect,
   onCameraAngleChange,
+  skipInitialFetch = false,
 }: TourViewer360Props) {
   const [scenes, setScenes] = useState<Scene360[]>(initialScenes);
   const [internalSceneIndex, setInternalSceneIndex] = useState(0);
@@ -101,6 +103,8 @@ export default function TourViewer360({
   const [isAutoRotating, setIsAutoRotating] = useState(!adminInteractive);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [currentYawDeg, setCurrentYawDeg] = useState<number>(0);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
 
   // Best-practice lifecycle & UX states
   const [ready, setReady] = useState(false);
@@ -114,6 +118,7 @@ export default function TourViewer360({
   // Live Refs to prevent stale closures and avoid recreating WebGL Viewer
   const containerRef = useRef<HTMLDivElement>(null);
   const viewportWrapperRef = useRef<HTMLDivElement>(null);
+  const thumbsStripRef = useRef<HTMLDivElement>(null);
   const viewerRef = useRef<Viewer | null>(null);
   const initOnceRef = useRef(false);
   const loadedOnceRef = useRef(false);
@@ -123,6 +128,22 @@ export default function TourViewer360({
 
   const scenesRef = useRef<Scene360[]>(scenes);
   scenesRef.current = scenes;
+
+  const updateThumbsScrollState = () => {
+    const el = thumbsStripRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  };
+
+  useEffect(() => {
+    updateThumbsScrollState();
+    const el = thumbsStripRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(updateThumbsScrollState);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [scenes.length, showThumbnails]);
   const activeIdxRef = useRef<number>(activeSceneIndex);
   activeIdxRef.current = activeSceneIndex;
   const adminRef = useRef<boolean>(adminInteractive);
@@ -219,15 +240,17 @@ export default function TourViewer360({
     };
     syncLocal();
 
-    const targetId = entidadId || entityKey;
-    const targetTipo = entidadTipo || 'habitacion';
-    fetchEscenas360ForEntity(targetTipo, targetId, getEntityScenes(entityKey, initialScenes)).then(
-      (dbScenes) => {
-        if (mounted && dbScenes) {
-          setScenes(dbScenes);
+    if (!skipInitialFetch) {
+      const targetId = entidadId || entityKey;
+      const targetTipo = entidadTipo || 'habitacion';
+      fetchEscenas360ForEntity(targetTipo, targetId, getEntityScenes(entityKey, initialScenes)).then(
+        (dbScenes) => {
+          if (mounted && dbScenes) {
+            setScenes(dbScenes);
+          }
         }
-      }
-    );
+      );
+    }
 
     window.addEventListener('xnox:scenes-updated', syncLocal);
     window.addEventListener('storage', syncLocal);
@@ -578,11 +601,11 @@ export default function TourViewer360({
           </div>
         )}
 
-        {/* Admin Mode Top Instructional Pill */}
+        {/* Admin Mode Bottom Instructional Pill (never overlaps top compass/controls) */}
         {adminInteractive && (
-          <div className="pointer-events-none absolute top-4 inset-x-0 flex justify-center z-20 px-4">
-            <div className="glass-hotspot px-5 py-2 rounded-full text-xs md:text-sm text-[#FAFAFA] text-center">
-              Click en cualquier punto de la esfera 360° para añadir hotspot (pitch, yaw)
+          <div className="pointer-events-none absolute bottom-3 inset-x-3 sm:inset-x-0 flex justify-center sm:justify-start sm:left-4 z-20">
+            <div className="glass-hotspot px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs text-[#FAFAFA] text-center shadow-lg">
+              Click en la esfera 360° para añadir hotspot (pitch, yaw)
             </div>
           </div>
         )}
@@ -591,7 +614,7 @@ export default function TourViewer360({
         {activeHotspot && (
           <div
             onClick={(e) => e.stopPropagation()}
-            className="absolute bottom-5 left-5 z-30 max-w-sm rounded-2xl p-4 text-white shadow-2xl animate-fadeIn"
+            className="absolute inset-x-3 bottom-3 sm:inset-x-auto sm:bottom-5 sm:left-5 z-30 sm:max-w-sm rounded-2xl p-3.5 sm:p-4 text-white shadow-2xl animate-fadeIn"
             style={{
               background: 'rgba(18, 18, 23, 0.92)',
               backdropFilter: 'blur(20px)',
@@ -656,16 +679,18 @@ export default function TourViewer360({
         </div>
 
         {/* Top-Right Controls: Pantalla completa & Giro 360° */}
-        <div className="absolute top-3.5 right-4 z-20 flex items-center gap-2">
+        <div className="absolute top-3 right-3 sm:top-3.5 sm:right-4 z-20 flex items-center gap-1.5 sm:gap-2">
           <button
             type="button"
             onClick={(e) => {
               e.stopPropagation();
               toggleFullscreen();
             }}
-            className="glass-hotspot px-3.5 py-1.5 rounded-xl text-xs md:text-sm text-[#FAFAFA] inline-flex items-center gap-2 hover:bg-white/15 transition-all cursor-pointer"
+            className="glass-hotspot px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs md:text-sm text-[#FAFAFA] inline-flex items-center gap-1.5 sm:gap-2 hover:bg-white/15 transition-all cursor-pointer"
           >
-            <span>{isFullscreen ? 'Salir pantalla completa' : 'Pantalla completa'}</span>
+            <span className="hidden sm:inline">
+              {isFullscreen ? 'Salir pantalla completa' : 'Pantalla completa'}
+            </span>
             {isFullscreen ? (
               <Minimize2 className="w-3.5 h-3.5" />
             ) : (
@@ -679,7 +704,7 @@ export default function TourViewer360({
               e.stopPropagation();
               setIsAutoRotating(!isAutoRotating);
             }}
-            className={`glass-hotspot px-3.5 py-1.5 rounded-xl text-xs md:text-sm inline-flex items-center gap-2 transition-all cursor-pointer ${
+            className={`glass-hotspot px-2.5 sm:px-3.5 py-1.5 rounded-xl text-xs md:text-sm inline-flex items-center gap-1.5 sm:gap-2 transition-all cursor-pointer ${
               isAutoRotating
                 ? 'bg-pink-600/35 border-pink-400 text-white'
                 : 'text-[#FAFAFA] hover:bg-white/15'
@@ -696,24 +721,33 @@ export default function TourViewer360({
         </div>
       </div>
 
-      {/* Horizontal Thumbnail Carousel (Up to 8 scenes) with A11y tablist */}
+      {/* Horizontal Single-Row Thumbnail Strip (Up to 8 scenes) edge-to-edge with contextual floating scroll arrows */}
       {showThumbnails && scenes.length > 1 && (
-        <div className="relative mt-4 flex items-center justify-center">
-          {showCarouselArrows && (
+        <div className="relative mt-4 w-full max-w-[1260px] mx-auto">
+          {(scenes.length > 3 || showCarouselArrows) && (
             <button
               type="button"
-              onClick={() => void gotoSceneRef.current((activeSceneIndex - 1 + scenes.length) % scenes.length)}
-              aria-label="Escena anterior"
-              className="hidden md:flex items-center justify-center w-8 h-8 rounded-full text-[#A1A1AA] hover:text-white hover:bg-white/10 transition-colors mr-2 cursor-pointer"
+              onClick={() => {
+                const el = thumbsStripRef.current;
+                if (el) el.scrollBy({ left: -Math.max(200, el.clientWidth * 0.75), behavior: 'smooth' });
+              }}
+              aria-label="Desplazar escenas a la izquierda"
+              className={`absolute left-1.5 sm:left-2 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/30 text-white shadow-lg transition-all cursor-pointer ${
+                canScrollLeft ? 'opacity-100 scale-100' : 'opacity-0 pointer-events-none scale-90'
+              }`}
             >
-              <ChevronLeft className="w-5 h-5" />
+              <ChevronLeft className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           )}
 
           <div
+            ref={thumbsStripRef}
+            onScroll={updateThumbsScrollState}
             role="tablist"
             aria-label="Escenas 360°"
-            className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-3 w-full max-w-[1260px]"
+            className={`flex flex-nowrap items-center gap-2 sm:gap-3 overflow-x-auto snap-x snap-mandatory scroll-smooth py-1 w-full [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${
+              scenes.length <= 3 ? 'justify-center' : 'justify-start'
+            }`}
           >
             {scenes.slice(0, 8).map((sc, idx) => {
               const isActive = idx === activeSceneIndex;
@@ -723,10 +757,17 @@ export default function TourViewer360({
                   type="button"
                   role="tab"
                   aria-selected={isActive}
-                  onClick={() => void gotoSceneRef.current(idx)}
-                  className={`group relative h-22 sm:h-24 rounded-2xl overflow-hidden text-left transition-all cursor-pointer ${
+                  onClick={(e) => {
+                    e.currentTarget.scrollIntoView({
+                      behavior: 'smooth',
+                      inline: 'nearest',
+                      block: 'nearest',
+                    });
+                    void gotoSceneRef.current(idx);
+                  }}
+                  className={`group relative snap-start shrink-0 w-[calc((100%-16px)/3)] sm:w-[calc((100%-36px)/4)] md:w-[calc((100%-60px)/6)] h-14 sm:h-20 md:h-24 rounded-xl sm:rounded-2xl overflow-hidden text-left transition-all cursor-pointer ${
                     isActive
-                      ? 'border-2 border-white shadow-[0_0_20px_rgba(255,255,255,0.22)] scale-[1.01]'
+                      ? 'border-2 border-white shadow-[0_0_16px_rgba(255,255,255,0.22)]'
                       : 'border border-[#27272A] opacity-80 hover:opacity-100 hover:border-white/40'
                   }`}
                 >
@@ -736,9 +777,9 @@ export default function TourViewer360({
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/25 to-transparent" />
-                  <div className="absolute bottom-2 inset-x-2 text-center">
+                  <div className="absolute bottom-1 sm:bottom-2 inset-x-1.5 sm:inset-x-2 text-center">
                     <span
-                      className={`text-xs font-medium block truncate ${
+                      className={`text-[10px] sm:text-xs font-medium block truncate ${
                         isActive ? 'text-white font-semibold' : 'text-[#D4D4D8]'
                       }`}
                     >
@@ -750,14 +791,19 @@ export default function TourViewer360({
             })}
           </div>
 
-          {showCarouselArrows && (
+          {(scenes.length > 3 || showCarouselArrows) && (
             <button
               type="button"
-              onClick={() => void gotoSceneRef.current((activeSceneIndex + 1) % scenes.length)}
-              aria-label="Siguiente escena"
-              className="hidden md:flex items-center justify-center w-8 h-8 rounded-full text-[#A1A1AA] hover:text-white hover:bg-white/10 transition-colors ml-2 cursor-pointer"
+              onClick={() => {
+                const el = thumbsStripRef.current;
+                if (el) el.scrollBy({ left: Math.max(200, el.clientWidth * 0.75), behavior: 'smooth' });
+              }}
+              aria-label="Desplazar escenas a la derecha"
+              className={`absolute right-1.5 sm:right-2 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-black/70 hover:bg-black/90 backdrop-blur-md border border-white/30 text-white shadow-lg transition-all cursor-pointer ${
+                canScrollRight ? 'opacity-100 scale-100' : 'opacity-0 pointer-events-none scale-90'
+              }`}
             >
-              <ChevronRight className="w-5 h-5" />
+              <ChevronRight className="w-4 h-4 sm:w-5 sm:h-5" />
             </button>
           )}
         </div>

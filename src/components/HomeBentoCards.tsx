@@ -4,13 +4,25 @@ import {
   fetchHabitacionesFromDb,
   fetchServiciosFromDb,
   fetchSedesFromDb,
+  getCachedHabitaciones,
+  getCachedServicios,
+  getCachedSedes,
   resolveMediaUrl,
 } from '../lib/supabase';
 
 export default function HomeBentoCards() {
-  const [suitesImg, setSuitesImg] = useState(EMPTY_PLACEHOLDER_IMG);
-  const [serviciosImg, setServiciosImg] = useState(EMPTY_PLACEHOLDER_IMG);
-  const [sedesImg, setSedesImg] = useState(EMPTY_PLACEHOLDER_IMG);
+  const [suitesImg, setSuitesImg] = useState(() => {
+    const c = getCachedHabitaciones()?.find((r) => r.portada_webp_url);
+    return c ? resolveMediaUrl(c.portada_webp_url) : EMPTY_PLACEHOLDER_IMG;
+  });
+  const [serviciosImg, setServiciosImg] = useState(() => {
+    const c = getCachedServicios()?.find((r) => r.portada_webp_url);
+    return c ? resolveMediaUrl(c.portada_webp_url) : EMPTY_PLACEHOLDER_IMG;
+  });
+  const [sedesImg, setSedesImg] = useState(() => {
+    const c = getCachedSedes()?.find((r) => r.imagen_portada_url);
+    return c ? resolveMediaUrl(c.imagen_portada_url) : EMPTY_PLACEHOLDER_IMG;
+  });
 
   useEffect(() => {
     fetchHabitacionesFromDb().then((rows) => {

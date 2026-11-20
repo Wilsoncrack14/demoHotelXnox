@@ -2,7 +2,6 @@
 import Layout from '../../layouts/Layout.astro';
 import Navbar from '../../components/Navbar';
 import RoomsCatalogGrid from '../../components/RoomsCatalogGrid';
-import { SEDES } from '../../data/hotelData';
 ---
 
 <Layout title="Habitaciones 360° — Catálogo de Suites | Hotel Xnox">
@@ -11,32 +10,20 @@ import { SEDES } from '../../data/hotelData';
       <Navbar client:load activeNav="habitaciones" />
     </div>
 
-    <main class="mx-auto w-full max-w-[1260px] px-4 md:px-6 pt-24 md:pt-28">
-      <div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
-        <div>
-          <h1 class="text-3xl sm:text-4xl md:text-[44px] font-light uppercase tracking-[-0.01em] text-[#FAFAFA]">
-            HABITACIONES 360°
-          </h1>
-          <p class="mt-1.5 text-sm md:text-base text-[#A1A1AA]">
-            Explora nuestras suites temáticas con recorrido virtual interactivo en 360°.
-          </p>
-        </div>
-
-        <div class="flex flex-wrap items-center gap-2">
-          {
-            SEDES.map((s) => (
-              <a
-                href={`/sedes/${s.slug}`}
-                class="px-3.5 py-1.5 rounded-full text-xs md:text-sm bg-[#18181D] border border-white/15 text-[#D4D4D8] hover:text-white hover:border-white/40 transition-all"
-              >
-                {s.name}
-              </a>
-            ))
-          }
-        </div>
+    <main class="mx-auto w-full max-w-[1440px] px-4 md:px-8 xl:px-10 pt-22 sm:pt-24 md:pt-28">
+      <div class="mb-5 sm:mb-6 pb-5 border-b border-white/10">
+        <span class="inline-block mb-2 text-[11px] uppercase tracking-[0.22em] text-[#A1A1AA]">
+          Catálogo Completo • 5 Sedes en Lima
+        </span>
+        <h1 class="text-2xl sm:text-4xl md:text-[46px] font-light uppercase tracking-[-0.015em] text-[#FAFAFA] leading-none">
+          HABITACIONES 360°
+        </h1>
+        <p class="mt-2 text-xs sm:text-sm md:text-base text-[#A1A1AA] max-w-xl">
+          Explora nuestras suites temáticas con recorrido virtual interactivo en 360°.
+        </p>
       </div>
 
-      <RoomsCatalogGrid client:load />
+      <RoomsCatalogGrid client:load showSedeFilter={true} />
     </main>
   </div>
 </Layout>

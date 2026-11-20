@@ -1,46 +1,57 @@
 import React, { useState, useEffect } from 'react';
 import { PROMOTIONS, type PromoItem } from '../data/hotelData';
 import { triggerWhatsAppModal } from '../data/store';
-import { fetchPromocionesFromDb, resolveMediaUrl } from '../lib/supabase';
+import {
+  fetchPromocionesFromDb,
+  getCachedPromociones,
+  resolveMediaUrl,
+  type DbPromocion,
+} from '../lib/supabase';
 
 const SEDE_FILTERS = ['Todas', 'Lince', 'Miraflores', 'San Borja', 'Surco', 'Los Olivos'] as const;
 
+function mapDbPromos(dbRows: DbPromocion[]): PromoItem[] {
+  return dbRows.map((row) => {
+    const existing = PROMOTIONS.find((p) => p.slug === row.slug);
+    if (existing) {
+      return {
+        ...existing,
+        title: row.titulo || existing.title,
+        promoPrice: `S/ ${row.precio_promo}`,
+        oldPrice: `S/ ${row.precio_regular}`,
+        validUntil: row.fecha_fin || existing.validUntil,
+        cardImage: row.imagen_webp_url ? resolveMediaUrl(row.imagen_webp_url) : existing.cardImage,
+      };
+    }
+    return {
+      slug: row.slug,
+      title: row.titulo,
+      detailHeaderTitle: `${row.titulo} — Promoción Especial`,
+      badgeText: 'PROMO ESPECIAL',
+      sedesLabel: 'Todas las sedes',
+      sedesFilter: ['Lince', 'Miraflores', 'San Borja', 'Surco', 'Los Olivos'],
+      validUntil: row.fecha_fin || '31 Dic 2026',
+      oldPrice: `S/ ${row.precio_regular}`,
+      promoPrice: `S/ ${row.precio_promo}`,
+      cardImage: resolveMediaUrl(row.imagen_webp_url || '/images/promo-noche-romantica.webp'),
+      availabilityTitle: 'Disponible en Todas las Sedes',
+      includesList: [row.descripcion],
+      scenes: PROMOTIONS[0].scenes,
+    };
+  });
+}
+
 export default function PromotionsCatalog() {
   const [selectedSede, setSelectedSede] = useState<string>('Todas');
-  const [promosList, setPromosList] = useState<PromoItem[]>(PROMOTIONS);
+  const [promosList, setPromosList] = useState<PromoItem[]>(() => {
+    const cached = getCachedPromociones();
+    return cached && cached.length > 0 ? mapDbPromos(cached) : PROMOTIONS;
+  });
 
   useEffect(() => {
     fetchPromocionesFromDb().then((dbRows) => {
       if (!dbRows || dbRows.length === 0) return;
-      const mapped: PromoItem[] = dbRows.map((row) => {
-        const existing = PROMOTIONS.find((p) => p.slug === row.slug);
-        if (existing) {
-          return {
-            ...existing,
-            title: row.titulo || existing.title,
-            promoPrice: `S/ ${row.precio_promo}`,
-            oldPrice: `S/ ${row.precio_regular}`,
-            validUntil: row.fecha_fin || existing.validUntil,
-            cardImage: row.imagen_webp_url ? resolveMediaUrl(row.imagen_webp_url) : existing.cardImage,
-          };
-        }
-        return {
-          slug: row.slug,
-          title: row.titulo,
-          detailHeaderTitle: `${row.titulo} — Promoción Especial`,
-          badgeText: 'PROMO ESPECIAL',
-          sedesLabel: 'Todas las sedes',
-          sedesFilter: ['Lince', 'Miraflores', 'San Borja', 'Surco', 'Los Olivos'],
-          validUntil: row.fecha_fin || '31 Dic 2026',
-          oldPrice: `S/ ${row.precio_regular}`,
-          promoPrice: `S/ ${row.precio_promo}`,
-          cardImage: resolveMediaUrl(row.imagen_webp_url || '/images/promo-noche-romantica.webp'),
-          availabilityTitle: 'Disponible en Todas las Sedes',
-          includesList: [row.descripcion],
-          scenes: PROMOTIONS[0].scenes,
-        };
-      });
-      if (mapped.length > 0) setPromosList(mapped);
+      setPromosList(mapDbPromos(dbRows));
     });
   }, []);
 
@@ -50,50 +61,39 @@ export default function PromotionsCatalog() {
       : promosList.filter((p) => p.sedesFilter.includes(selectedSede));
 
   return (
-    <section className="mx-auto w-full max-w-[1260px] px-4 md:px-6 pt-24 md:pt-28 pb-20">
-      {/* Editorial Header & Sede Filter Pill Bar */}
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6 mb-9">
-        <div>
-          <h1 className="text-3xl sm:text-4xl md:text-[44px] font-light uppercase tracking-[-0.01em] text-[#FAFAFA] leading-[1.08]">
-            PROMOCIONES &
-            <br />
-            PAQUETES
-          </h1>
-          <p className="mt-2 text-sm md:text-base text-[#A1A1AA]">
-            Ofertas especiales y experiencias exclusivas por sede.
-          </p>
-        </div>
+    <section className="mx-auto w-full max-w-[1440px] px-4 md:px-8 xl:px-10 pt-22 sm:pt-24 md:pt-28 pb-20">
+      {/* Editorial Header matching /habitaciones */}
+      <div className="mb-5 sm:mb-6 pb-5 border-b border-white/10">
+        <span className="inline-block mb-2 text-[11px] uppercase tracking-[0.22em] text-[#A1A1AA]">
+          Ofertas Especiales • 5 Sedes en Lima
+        </span>
+        <h1 className="text-2xl sm:text-4xl md:text-[46px] font-light uppercase tracking-[-0.015em] text-[#FAFAFA] leading-none">
+          PROMOCIONES & PAQUETES
+        </h1>
+        <p className="mt-2 text-xs sm:text-sm md:text-base text-[#A1A1AA] max-w-xl">
+          Ofertas especiales y experiencias exclusivas por sede.
+        </p>
+      </div>
 
-        {/* Location Filter Pill Bar matching promociones.jpg */}
-        <div
-          className="inline-flex flex-wrap items-center gap-1 p-1.5 rounded-full self-start lg:self-auto"
-          style={{
-            background: 'rgba(28, 28, 34, 0.85)',
-            border: '1px solid rgba(255, 255, 255, 0.16)',
-          }}
-        >
-          {SEDE_FILTERS.map((sede, idx) => {
-            const isActive = selectedSede === sede;
-            return (
-              <React.Fragment key={sede}>
-                {idx > 1 && !isActive && selectedSede !== SEDE_FILTERS[idx - 1] && (
-                  <span className="text-[#71717A] text-xs select-none px-0.5">•</span>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setSelectedSede(sede)}
-                  className={`px-4 py-1.5 rounded-full text-xs md:text-sm transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-white text-[#09090B] font-semibold shadow-sm'
-                      : 'text-[#D4D4D8] hover:text-white'
-                  }`}
-                >
-                  {sede}
-                </button>
-              </React.Fragment>
-            );
-          })}
-        </div>
+      {/* Location Filter Pill Bar matching /habitaciones */}
+      <div className="mb-6 sm:mb-8 flex flex-nowrap sm:flex-wrap items-center gap-2 overflow-x-auto pb-1 sm:pb-0 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {SEDE_FILTERS.map((sede) => {
+          const isActive = selectedSede === sede;
+          return (
+            <button
+              key={sede}
+              type="button"
+              onClick={() => setSelectedSede(sede)}
+              className={`shrink-0 whitespace-nowrap px-4 py-1.5 rounded-full text-xs md:text-sm transition-all cursor-pointer ${
+                isActive
+                  ? 'bg-white text-[#09090B] font-semibold'
+                  : 'bg-[#16161B] border border-white/15 text-[#D4D4D8] hover:text-white hover:bg-white/10 hover:border-white/35'
+              }`}
+            >
+              {sede}
+            </button>
+          );
+        })}
       </div>
 
       {/* 3-Column Bento Promotions Grid */}

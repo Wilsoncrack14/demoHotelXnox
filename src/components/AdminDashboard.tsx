@@ -14,6 +14,7 @@ import {
   X,
   Pencil,
   Compass,
+  Eye,
 } from 'lucide-react';
 import type { Scene360, Hotspot360 } from '../data/hotelData';
 import {
@@ -38,6 +39,8 @@ import {
   fetchHeroSlidesFromDb,
   fetchEscenas360ForEntity,
   updateParentEntityCover,
+  invalidateSupabaseCache,
+  resolveMediaUrl,
   isValidUuid,
   type DbSede,
   type DbHabitacion,
@@ -51,6 +54,7 @@ export default function AdminDashboard() {
   const [selectedEntityKey, setSelectedEntityKey] = useState<string>('habitaciones:suite-neon-jacuzzi');
 
   const refreshAdminEntities = async () => {
+    invalidateSupabaseCache();
     const [dbSedes, dbHabs, dbServs, dbPromos] = await Promise.all([
       fetchSedesFromDb(),
       fetchHabitacionesFromDb(),
@@ -113,6 +117,39 @@ export default function AdminDashboard() {
   useEffect(() => {
     void refreshAdminEntities();
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onPopState = (ev: PopStateEvent) => {
+      const st = ev.state as {
+        adminMode?: 'catalog' | '360';
+        catalogTab?: 'hero_slides' | 'sedes' | 'habitaciones' | 'servicios' | 'promociones';
+        catalogEditRowId?: string | null;
+      } | null;
+      if (!st) return;
+      if (st.catalogTab) setCatalogTab(st.catalogTab);
+      setCatalogEditRowId(st.catalogEditRowId ?? null);
+      if (st.adminMode) setAdminMode(st.adminMode);
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
+
+  const navigateAdminStep = (
+    nextMode: 'catalog' | '360',
+    nextTab: 'hero_slides' | 'sedes' | 'habitaciones' | 'servicios' | 'promociones' = catalogTab,
+    nextEditId: string | null = catalogEditRowId
+  ) => {
+    setCatalogTab(nextTab);
+    setCatalogEditRowId(nextEditId);
+    setAdminMode(nextMode);
+    if (typeof window !== 'undefined') {
+      window.history.pushState(
+        { adminMode: nextMode, catalogTab: nextTab, catalogEditRowId: nextEditId },
+        ''
+      );
+    }
+  };
   const [scenes, setScenes] = useState<Scene360[]>([]);
   const [activeSceneIdx, setActiveSceneIdx] = useState<number>(0);
   const [editingHotspotId, setEditingHotspotId] = useState<string | null>(null);
@@ -128,30 +165,73 @@ export default function AdminDashboard() {
   const currentCameraAngleRef = useRef<{ pitch: number; yaw: number }>({ pitch: 0, yaw: 0 });
   const [savedNotice, setSavedNotice] = useState<string>('Conectado a Supabase + R2');
   const [openMenu, setOpenMenu] = useState<'sedes' | 'habitaciones' | 'servicios' | 'promociones' | null>(null);
-  const [crudModalTab, setCrudModalTab] = useState<'hero_slides' | 'sedes' | 'habitaciones' | 'servicios' | 'promociones' | null>(null);
+  const [adminMode, setAdminMode] = useState<'catalog' | '360'>('360');
+  const [catalogTab, setCatalogTab] = useState<'hero_slides' | 'sedes' | 'habitaciones' | 'servicios' | 'promociones'>('habitaciones');
+  const [catalogEditRowId, setCatalogEditRowId] = useState<string | null>(null);
+  const [isSaving360, setIsSaving360] = useState<boolean>(false);
   const [isUploadingWebP, setIsUploadingWebP] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [uploadStage, setUploadStage] = useState<string>('');
   const [loadingScenes, setLoadingScenes] = useState<boolean>(false);
+  const [entityCoverUrl, setEntityCoverUrl] = useState<string>('');
+  const [isUploadingCover, setIsUploadingCover] = useState<boolean>(false);
+  const [coverUploadProgress, setCoverUploadProgress] = useState<number>(0);
+  const [previewCoverModal, setPreviewCoverModal] = useState<boolean>(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const coverFileInputRef = useRef<HTMLInputElement>(null);
 
   const currentEntity: AdminEditableEntity =
     allEntities.find((e) => e.key === selectedEntityKey) || allEntities[0];
 
   const activeScene = scenes[activeSceneIdx] || scenes[0];
+  const primarySceneFallback =
+    scenes.find((s) => s.isPrimary)?.thumbUrl ||
+    scenes.find((s) => s.isPrimary)?.panoramaUrl ||
+    scenes[0]?.thumbUrl ||
+    scenes[0]?.panoramaUrl ||
+    '';
+  const effectiveCoverUrl = entityCoverUrl ? resolveMediaUrl(entityCoverUrl) : primarySceneFallback;
+  const isUsingPrimaryFallback = !entityCoverUrl && Boolean(primarySceneFallback);
 
-  // Load real scenes & hotspots from Supabase for the selected entity
+  const fetchCurrentEntityCover = async (entity: AdminEditableEntity): Promise<string> => {
+    if (!supabase || !isValidUuid(entity.entityUuid)) return '';
+    try {
+      const col =
+        entity.category === 'sedes'
+          ? 'imagen_portada_url'
+          : entity.category === 'promociones'
+            ? 'imagen_webp_url'
+            : 'portada_webp_url';
+      const { data } = await supabase
+        .from(entity.category)
+        .select(col)
+        .eq('id', entity.entityUuid)
+        .maybeSingle();
+      return (data as Record<string, string> | null)?.[col] || '';
+    } catch {
+      return '';
+    }
+  };
+
+  // Load real scenes, hotspots & portada from Supabase for the selected entity
   useEffect(() => {
     let mounted = true;
+    setScenes([]);
+    setEntityCoverUrl('');
+    setActiveSceneIdx(0);
+    setEditingHotspotId(null);
+    setRelocatingHotspotId(null);
+    setEditingSceneR2Name(false);
+    setPreviewCoverModal(false);
     setLoadingScenes(true);
-    fetchEscenas360ForEntity(
-      currentEntity.dbEntidadTipo,
-      currentEntity.entityUuid,
-      []
-    ).then((dbScenes) => {
+    Promise.all([
+      fetchEscenas360ForEntity(currentEntity.dbEntidadTipo, currentEntity.entityUuid, []),
+      fetchCurrentEntityCover(currentEntity),
+    ]).then(([dbScenes, coverUrl]) => {
       if (!mounted) return;
       setScenes(dbScenes);
+      setEntityCoverUrl(coverUrl);
       saveEntityScenes(selectedEntityKey, dbScenes);
       setActiveSceneIdx(0);
       setEditingHotspotId(null);
@@ -294,6 +374,75 @@ export default function AdminDashboard() {
       setSavedNotice(err instanceof Error ? err.message : 'Error renombrando en R2');
     } finally {
       setIsRenamingSceneR2(false);
+    }
+  };
+
+  const handleEntityCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      setIsUploadingCover(true);
+      setCoverUploadProgress(10);
+      setSavedNotice('Subiendo portada a Cloudflare R2...');
+      const res = await compressAndUpload360Scene(
+        file,
+        {
+          section: currentEntity.category,
+          slug: currentEntity.slug,
+          kind: 'portada',
+          customName: customSceneFileName.trim() || undefined,
+        },
+        (pct) => setCoverUploadProgress(pct)
+      );
+      setCustomSceneFileName('');
+      const coverErr = await updateParentEntityCover(
+        currentEntity.category,
+        currentEntity.entityUuid,
+        res.panoramaUrl
+      );
+      if (coverErr) throw new Error(coverErr);
+      invalidateSupabaseCache();
+      setCoverUploadProgress(100);
+      setEntityCoverUrl(res.panoramaUrl);
+      setSavedNotice(`Portada actualizada en R2 + Supabase (${res.fileSizeWebP})`);
+    } catch (err) {
+      setSavedNotice(err instanceof Error ? err.message : 'Error subiendo portada');
+      setCoverUploadProgress(0);
+    } finally {
+      setTimeout(() => {
+        setIsUploadingCover(false);
+        setCoverUploadProgress(0);
+      }, 650);
+    }
+  };
+
+  const handleConfirmSave360Changes = async () => {
+    if (!activeScene) {
+      invalidateSupabaseCache();
+      setSavedNotice('Cambios confirmados');
+      return;
+    }
+    try {
+      setIsSaving360(true);
+      if (supabase && isValidUuid(activeScene.id)) {
+        const { error } = await supabase
+          .from('escenas_360')
+          .update({
+            titulo: activeScene.title,
+            pitch_inicial: activeScene.initialPitch ?? currentCameraAngleRef.current.pitch,
+            yaw_inicial: activeScene.initialYaw ?? currentCameraAngleRef.current.yaw,
+          })
+          .eq('id', activeScene.id);
+        if (error) throw new Error(error.message);
+      }
+      invalidateSupabaseCache();
+      saveEntityScenes(selectedEntityKey, scenes);
+      setSavedNotice(`Cambios guardados en Supabase (${activeScene.title})`);
+    } catch (err) {
+      setSavedNotice(err instanceof Error ? err.message : 'Error al confirmar cambios');
+    } finally {
+      setIsSaving360(false);
     }
   };
 
@@ -635,7 +784,7 @@ export default function AdminDashboard() {
                         <button
                           type="button"
                           onClick={() => {
-                            setCrudModalTab(cat);
+                            navigateAdminStep('catalog', cat, null);
                             setOpenMenu(null);
                           }}
                           className="text-[11px] text-pink-400 hover:text-pink-300 font-medium inline-flex items-center gap-1 cursor-pointer"
@@ -650,6 +799,7 @@ export default function AdminDashboard() {
                           type="button"
                           onClick={() => {
                             setSelectedEntityKey(item.key);
+                            navigateAdminStep('360', cat, null);
                             setOpenMenu(null);
                           }}
                           className={`w-full text-left px-3 py-2 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
@@ -676,23 +826,29 @@ export default function AdminDashboard() {
 
             <button
               type="button"
-              onClick={() => setCrudModalTab('hero_slides')}
-              className="px-3.5 py-1.5 rounded-full text-xs text-white/90 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20 inline-flex items-center gap-1.5 transition-all cursor-pointer"
-            >
-              <span>Hero Banner</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setCrudModalTab('habitaciones')}
-              className="px-3.5 py-1.5 rounded-full text-xs text-white/90 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20 inline-flex items-center gap-1.5 transition-all cursor-pointer"
+              onClick={() => navigateAdminStep('catalog', catalogTab, null)}
+              className={`px-3.5 py-1.5 rounded-full text-xs inline-flex items-center gap-1.5 transition-all cursor-pointer ${
+                adminMode === 'catalog'
+                  ? 'bg-white text-[#09090B] font-semibold'
+                  : 'text-white/90 hover:text-white bg-white/10 hover:bg-white/20 border border-white/20'
+              }`}
             >
               <Database className="w-3.5 h-3.5 text-pink-400" />
-              <span>Gestor BD</span>
+              <span>Gestor Contenido</span>
             </button>
           </div>
 
           <div className="flex items-center gap-2.5">
+            <button
+              type="button"
+              onClick={() =>
+                navigateAdminStep(adminMode === 'catalog' ? '360' : 'catalog', catalogTab, null)
+              }
+              className="md:hidden px-3 py-1.5 rounded-full text-xs text-white bg-white/10 border border-white/20 inline-flex items-center gap-1 cursor-pointer"
+            >
+              <Database className="w-3.5 h-3.5 text-pink-400" />
+              <span>{adminMode === 'catalog' ? 'Editor 360°' : 'Gestor'}</span>
+            </button>
             <a
               href={getPublicPreviewUrl()}
               className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs text-white bg-white/10 hover:bg-white/20 border border-white/20 transition-all"
@@ -712,68 +868,219 @@ export default function AdminDashboard() {
       </header>
 
       {/* Main Content Container */}
-      <main className="mx-auto w-full max-w-[1360px] px-4 md:px-6 pt-7">
-        {/* Sub-header Bar */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-          <div className="flex flex-wrap items-center gap-3.5">
-            <h1 className="text-xl sm:text-2xl md:text-[28px] font-normal tracking-tight text-[#FAFAFA]">
-              Editando: {currentEntity.fullLabel}
-            </h1>
+      <main className="mx-auto w-full max-w-[1440px] px-4 md:px-6 pt-6">
+        {adminMode === 'catalog' ? (
+          <RelationalCrudModal
+            activeTab={catalogTab}
+            initialEditRowId={catalogEditRowId}
+            onTabChange={(t) => {
+              setCatalogTab(t);
+              setCatalogEditRowId(null);
+            }}
+            onEditingRowChange={(id) => {
+              setCatalogEditRowId(id);
+            }}
+            onClose={() => {
+              navigateAdminStep('360', catalogTab, null);
+              void refreshAdminEntities();
+            }}
+            onNotify={(msg) => setSavedNotice(msg)}
+            onOpen360Scenes={(entity, sourceRowId) => {
+              setAllEntities((prev) =>
+                prev.some((e) => e.key === entity.key) ? prev : [...prev, entity]
+              );
+              setSelectedEntityKey(entity.key);
+              navigateAdminStep('360', catalogTab, sourceRowId ?? entity.entityUuid);
+            }}
+          />
+        ) : (
+          <>
+            {/* Sub-header Bar: Row 1 Navigation + Actions, Row 2 Clean Title */}
+            <div className="rounded-[22px] bg-[#16161B] border border-white/12 p-4 sm:p-5 mb-6 space-y-3.5">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {catalogEditRowId && (
+                    <button
+                      type="button"
+                      onClick={() => navigateAdminStep('catalog', catalogTab, catalogEditRowId)}
+                      className="px-3.5 py-1.5 rounded-full bg-white/15 hover:bg-white/25 border border-white/25 text-xs font-medium text-white cursor-pointer transition-colors"
+                    >
+                      ← Volver al Detalle
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => navigateAdminStep('catalog', catalogTab, null)}
+                    className="px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-xs text-[#E4E4E7] cursor-pointer transition-colors"
+                  >
+                    ← Ir al Catálogo
+                  </button>
+                </div>
 
-            <span
-              className="inline-flex items-center gap-1.5 px-3.5 py-1 rounded-full text-xs md:text-sm font-medium text-[#4ADE80]"
-              style={{
-                background: 'rgba(20, 83, 45, 0.45)',
-                border: '1px solid rgba(74, 222, 128, 0.35)',
-              }}
-            >
-              <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-              <span>{loadingScenes ? 'Cargando de Supabase...' : savedNotice}</span>
-            </span>
-          </div>
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <span
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-[#4ADE80]"
+                    style={{
+                      background: 'rgba(20, 83, 45, 0.45)',
+                      border: '1px solid rgba(74, 222, 128, 0.35)',
+                    }}
+                  >
+                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span>{loadingScenes ? 'Cargando...' : savedNotice}</span>
+                  </span>
 
-          <div className="flex items-center gap-2.5">
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={scenes.length >= 8 || isUploadingWebP}
-              className="relative overflow-hidden px-5 py-2.5 rounded-full bg-white text-[#09090B] font-semibold text-xs md:text-sm inline-flex items-center gap-1.5 hover:bg-neutral-200 disabled:opacity-90 transition-all shadow-md cursor-pointer"
-            >
-              {isUploadingWebP && (
-                <LiquidUploadFill progress={uploadProgress} isComplete={uploadProgress === 100} />
-              )}
-              <span className="relative z-10 inline-flex items-center gap-1.5">
-                {uploadProgress === 100 ? (
-                  <Check className="w-4 h-4 stroke-[2.5] text-emerald-700" />
-                ) : (
-                  <Plus className="w-4 h-4 stroke-[2.5]" />
-                )}
-                <span>
-                  {isUploadingWebP
-                    ? `${uploadStage || 'Subiendo...'} ${uploadProgress}%`
-                    : 'Subir Escena 360°'}
+                  <button
+                    type="button"
+                    disabled={isSaving360}
+                    onClick={() => void handleConfirmSave360Changes()}
+                    className="px-4 py-2 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-400/50 text-[#4ADE80] font-semibold text-xs inline-flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-60"
+                  >
+                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                    <span>{isSaving360 ? 'Guardando...' : 'Guardar Cambios'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={scenes.length >= 8 || isUploadingWebP}
+                    className="relative overflow-hidden px-4 py-2 rounded-full bg-white text-[#09090B] font-semibold text-xs inline-flex items-center gap-1.5 hover:bg-neutral-200 disabled:opacity-90 transition-all shadow-md cursor-pointer"
+                  >
+                    {isUploadingWebP && (
+                      <LiquidUploadFill progress={uploadProgress} isComplete={uploadProgress === 100} />
+                    )}
+                    <span className="relative z-10 inline-flex items-center gap-1.5">
+                      {uploadProgress === 100 ? (
+                        <Check className="w-3.5 h-3.5 stroke-[2.5] text-emerald-700" />
+                      ) : (
+                        <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
+                      )}
+                      <span>
+                        {isUploadingWebP
+                          ? `${uploadStage || 'Subiendo...'} ${uploadProgress}%`
+                          : 'Subir Escena 360°'}
+                      </span>
+                    </span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="pt-2 border-t border-white/10 flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-medium tracking-tight text-[#FAFAFA]">
+                    {currentEntity.title}
+                  </h1>
+                  <p className="text-xs text-[#A1A1AA] mt-0.5">
+                    {currentEntity.fullLabel} • Gestiona escenas 360°, ángulo inicial y hotspots
+                  </p>
+                </div>
+                <span className="text-[11px] text-[#71717A]">
+                  {scenes.length}/8 escenas cargadas
                 </span>
-              </span>
-            </button>
-          </div>
-        </div>
+              </div>
+            </div>
 
         {/* Split Workspace */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
           {/* LEFT SIDEBAR: Lista de Escenas (Máx. 8) */}
           <aside
-            className="lg:col-span-4 xl:col-span-3 rounded-[24px] p-4 md:p-5"
+            className="lg:col-span-4 xl:col-span-3 rounded-[24px] p-4 md:p-5 space-y-5"
             style={{
               background: '#202025',
               border: '1px solid rgba(255, 255, 255, 0.14)',
             }}
           >
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-base md:text-[17px] font-normal text-[#FAFAFA]">
-                Lista de Escenas (Máx. 8)
-              </h2>
-              <span className="text-xs text-[#A1A1AA]">{scenes.length}/8</span>
+            {/* Portada Pública Card (shows uploaded portada or primary 360° scene fallback) */}
+            <div className="rounded-2xl bg-[#16161B] border border-white/12 p-3 space-y-2.5">
+              <input
+                ref={coverFileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                onChange={handleEntityCoverUpload}
+                className="hidden"
+              />
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[#FAFAFA]">Imagen de Portada</span>
+                {entityCoverUrl ? (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-[#4ADE80] text-[10px] font-medium">
+                    <Check className="w-2.5 h-2.5 stroke-[2.5]" />
+                    <span>Portada R2</span>
+                  </span>
+                ) : isUsingPrimaryFallback ? (
+                  <span className="px-2 py-0.5 rounded-full bg-white/10 border border-white/15 text-[#D4D4D8] text-[10px]">
+                    Escena principal
+                  </span>
+                ) : (
+                  <span className="text-[10px] text-[#71717A]">Sin portada</span>
+                )}
+              </div>
+
+              {effectiveCoverUrl ? (
+                <div
+                  onClick={() => setPreviewCoverModal(true)}
+                  className="group relative h-28 w-full rounded-xl overflow-hidden border border-white/15 cursor-pointer"
+                >
+                  <img
+                    src={effectiveCoverUrl}
+                    alt={`Portada ${currentEntity.title}`}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                  />
+                  <div className="absolute inset-0 bg-black/0 group-hover:bg-black/35 transition-colors flex items-center justify-center">
+                    <span className="opacity-0 group-hover:opacity-100 inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-black/75 text-white text-[11px] font-medium transition-opacity">
+                      <Eye className="w-3 h-3" />
+                      <span>Ver portada</span>
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div className="h-20 w-full rounded-xl border border-dashed border-white/20 bg-[#121215] flex items-center justify-center text-[11px] text-[#71717A] text-center px-3">
+                  Sube una portada o marca una escena 360° como principal
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                {effectiveCoverUrl && (
+                  <button
+                    type="button"
+                    onClick={() => setPreviewCoverModal(true)}
+                    className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-xs text-white inline-flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Ver</span>
+                  </button>
+                )}
+                <button
+                  type="button"
+                  disabled={isUploadingCover}
+                  onClick={() => coverFileInputRef.current?.click()}
+                  className="relative overflow-hidden flex-1 px-3 py-1.5 rounded-xl bg-white text-[#09090B] font-semibold text-xs inline-flex items-center justify-center gap-1.5 hover:bg-neutral-200 transition-colors cursor-pointer disabled:opacity-80"
+                >
+                  {isUploadingCover && (
+                    <LiquidUploadFill
+                      progress={coverUploadProgress}
+                      isComplete={coverUploadProgress === 100}
+                    />
+                  )}
+                  <span className="relative z-10 inline-flex items-center gap-1.5">
+                    <Upload className="w-3.5 h-3.5" />
+                    <span>
+                      {isUploadingCover
+                        ? `${coverUploadProgress}%`
+                        : entityCoverUrl
+                          ? 'Cambiar Portada'
+                          : 'Subir Portada'}
+                    </span>
+                  </span>
+                </button>
+              </div>
             </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-4">
+                <h2 className="text-base md:text-[17px] font-normal text-[#FAFAFA]">
+                  Lista de Escenas (Máx. 8)
+                </h2>
+                <span className="text-xs text-[#A1A1AA]">{scenes.length}/8</span>
+              </div>
 
             <div className="space-y-3">
               {scenes.map((scene, idx) => {
@@ -914,6 +1221,7 @@ export default function AdminDashboard() {
                 );
               })}
             </div>
+            </div>
           </aside>
 
           {/* RIGHT WORKSPACE: Lienzo Interactivo 360° (~75%) powered by TourViewer360 */}
@@ -924,94 +1232,105 @@ export default function AdminDashboard() {
               border: '1px solid rgba(255, 255, 255, 0.14)',
             }}
           >
-            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-              <div className="flex items-center gap-3">
-                <h2 className="text-base md:text-lg font-normal text-[#FAFAFA]">
+            <div className="space-y-3 mb-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="text-base md:text-lg font-medium text-[#FAFAFA]">
                   Lienzo Interactivo 360°
                 </h2>
-                {activeScene && (
-                  <>
+                <span className="text-xs text-[#A1A1AA]">
+                  {relocatingHotspotId ? (
+                    <span className="text-amber-300 font-medium">
+                      Haz clic sobre la esfera 360° para reubicar el hotspot seleccionado
+                    </span>
+                  ) : (
+                    <>
+                      Bucket R2: <strong className="text-white">hotel-xnox-media</strong> • Click en visor para añadir hotspot
+                    </>
+                  )}
+                </span>
+              </div>
+
+              {activeScene && (
+                <div className="flex flex-wrap items-center gap-2.5 pt-2.5 border-t border-white/10">
+                  <div className="flex items-center gap-2 flex-1 min-w-[200px]">
+                    <span className="text-[11px] text-[#A1A1AA] shrink-0">Escena:</span>
                     <input
                       type="text"
                       value={activeScene.title}
                       onChange={(e) => void handleRenameActiveScene(e.target.value)}
                       placeholder="Nombre de escena..."
-                      className="rounded-xl bg-[#121215] border border-white/15 px-3 py-1 text-xs text-white focus:outline-none focus:border-white/40"
+                      className="w-full max-w-xs rounded-xl bg-[#121215] border border-white/15 px-3 py-1.5 text-xs text-white focus:outline-none focus:border-white/40"
                     />
-                    {!editingSceneR2Name ? (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSceneR2NameDraft(
-                            getFileNameFromUrl(activeScene.panoramaUrl).replace(/\.[^.]+$/, '')
-                          );
-                          setEditingSceneR2Name(true);
-                        }}
-                        title="Renombrar archivo en Cloudflare R2"
-                        className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 hover:bg-white/20 px-2.5 py-1 text-[11px] text-[#E4E4E7] cursor-pointer"
-                      >
-                        <Pencil className="w-3 h-3" />
-                        <span className="max-w-[140px] truncate">
-                          {getFileNameFromUrl(activeScene.panoramaUrl) || 'Renombrar R2'}
-                        </span>
-                      </button>
-                    ) : (
-                      <form onSubmit={handleRenameSceneR2} className="inline-flex items-center gap-1.5">
-                        <input
-                          type="text"
-                          value={sceneR2NameDraft}
-                          onChange={(e) => setSceneR2NameDraft(e.target.value)}
-                          placeholder="nuevo-nombre-r2"
-                          className="rounded-lg bg-[#121215] border border-white/25 px-2.5 py-1 text-[11px] text-white focus:outline-none"
-                        />
-                        <button
-                          type="submit"
-                          disabled={isRenamingSceneR2}
-                          className="rounded-lg bg-white text-[#09090B] px-2.5 py-1 text-[11px] font-semibold cursor-pointer disabled:opacity-50"
-                        >
-                          {isRenamingSceneR2 ? '...' : 'Guardar R2'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setEditingSceneR2Name(false)}
-                          className="rounded-lg bg-white/10 text-[#A1A1AA] px-2 py-1 text-[11px] cursor-pointer"
-                        >
-                          Cancelar
-                        </button>
-                      </form>
-                    )}
+                  </div>
+
+                  {!editingSceneR2Name ? (
                     <button
                       type="button"
-                      onClick={() => void handleSaveInitialAngle()}
-                      title="Guarda el ángulo actual de la cámara como vista inicial de esta escena"
-                      className="inline-flex items-center gap-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/40 px-2.5 py-1 text-[11px] text-pink-200 font-medium cursor-pointer"
+                      onClick={() => {
+                        setSceneR2NameDraft(
+                          getFileNameFromUrl(activeScene.panoramaUrl).replace(/\.[^.]+$/, '')
+                        );
+                        setEditingSceneR2Name(true);
+                      }}
+                      title="Renombrar archivo en Cloudflare R2"
+                      className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 hover:bg-white/20 px-3 py-1.5 text-xs text-[#E4E4E7] cursor-pointer"
                     >
-                      <Compass className="w-3.5 h-3.5" />
-                      <span>
-                        Fijar Ángulo ({cameraAngleDisplay.yaw}°, {cameraAngleDisplay.pitch}°)
+                      <Pencil className="w-3 h-3" />
+                      <span className="max-w-[160px] truncate">
+                        {getFileNameFromUrl(activeScene.panoramaUrl) || 'Renombrar R2'}
                       </span>
                     </button>
-                  </>
-                )}
-              </div>
-              <span className="text-xs text-[#A1A1AA]">
-                {relocatingHotspotId ? (
-                  <span className="text-amber-300 font-medium">
-                    Haz clic sobre la esfera 360° para reubicar el hotspot seleccionado
-                  </span>
-                ) : (
-                  <>
-                    Bucket R2: <strong className="text-white">hotel-xnox-media</strong> • Click en visor 360° guarda hotspot en Supabase
-                  </>
-                )}
-              </span>
+                  ) : (
+                    <form onSubmit={handleRenameSceneR2} className="inline-flex flex-wrap items-center gap-1.5">
+                      <input
+                        type="text"
+                        value={sceneR2NameDraft}
+                        onChange={(e) => setSceneR2NameDraft(e.target.value)}
+                        placeholder="nuevo-nombre-r2"
+                        className="rounded-lg bg-[#121215] border border-white/25 px-2.5 py-1 text-xs text-white focus:outline-none"
+                      />
+                      <button
+                        type="submit"
+                        disabled={isRenamingSceneR2}
+                        className="rounded-lg bg-white text-[#09090B] px-2.5 py-1 text-xs font-semibold cursor-pointer disabled:opacity-50"
+                      >
+                        {isRenamingSceneR2 ? '...' : 'Guardar R2'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setEditingSceneR2Name(false)}
+                        className="rounded-lg bg-white/10 text-[#A1A1AA] px-2 py-1 text-xs cursor-pointer"
+                      >
+                        Cancelar
+                      </button>
+                    </form>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => void handleSaveInitialAngle()}
+                    title="Guarda el ángulo actual de la cámara como vista inicial de esta escena"
+                    className="inline-flex items-center gap-1.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/40 px-3 py-1.5 text-xs text-pink-200 font-medium cursor-pointer"
+                  >
+                    <Compass className="w-3.5 h-3.5" />
+                    <span>
+                      Fijar Ángulo ({cameraAngleDisplay.yaw}°, {cameraAngleDisplay.pitch}°)
+                    </span>
+                  </button>
+                </div>
+              )}
             </div>
 
-            {activeScene ? (
+            {loadingScenes ? (
+              <div className="w-full h-[340px] sm:h-[400px] md:h-[430px] rounded-[20px] border border-white/10 bg-[#121215] flex items-center justify-center text-sm text-[#A1A1AA]">
+                Cargando escenas 360° de {currentEntity.title}...
+              </div>
+            ) : activeScene ? (
               <TourViewer360
-                key={selectedEntityKey}
+                key={`${selectedEntityKey}:${scenes[0]?.id || 'empty'}`}
                 entityKey={selectedEntityKey}
                 initialScenes={scenes}
+                skipInitialFetch={true}
                 showThumbnails={false}
                 heightClass="h-[340px] sm:h-[400px] md:h-[430px]"
                 adminInteractive={true}
@@ -1200,26 +1519,45 @@ export default function AdminDashboard() {
             </div>
           </section>
         </div>
+          </>
+        )}
       </main>
 
-      {/* Complete Relational CRUD Modal for Sedes, Habitaciones, Servicios, Promociones */}
-      {crudModalTab && (
-        <RelationalCrudModal
-          activeTab={crudModalTab}
-          onTabChange={setCrudModalTab}
-          onClose={() => {
-            setCrudModalTab(null);
-            void refreshAdminEntities();
-          }}
-          onNotify={(msg) => setSavedNotice(msg)}
-          onOpen360Scenes={(entity) => {
-            setAllEntities((prev) =>
-              prev.some((e) => e.key === entity.key) ? prev : [...prev, entity]
-            );
-            setSelectedEntityKey(entity.key);
-            setCrudModalTab(null);
-          }}
-        />
+      {previewCoverModal && effectiveCoverUrl && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
+          onClick={() => setPreviewCoverModal(false)}
+        >
+          <div
+            className="w-full max-w-3xl rounded-3xl p-4 sm:p-5 bg-[#16161B] border border-white/15 space-y-3"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm sm:text-base font-medium text-white">
+                  Portada — {currentEntity.title}
+                </h3>
+                <p className="text-[11px] text-[#A1A1AA]">
+                  {entityCoverUrl
+                    ? 'Imagen de portada personalizada en Cloudflare R2'
+                    : 'Mostrando escena principal 360° como portada'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPreviewCoverModal(false)}
+                className="p-1.5 rounded-full bg-white/10 hover:bg-white/20 text-white cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <img
+              src={effectiveCoverUrl}
+              alt={`Portada ${currentEntity.title}`}
+              className="w-full max-h-[70vh] object-contain rounded-2xl border border-white/10 bg-black"
+            />
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1384,16 +1722,20 @@ function HotspotInlineEditor({
 
 function RelationalCrudModal({
   activeTab,
+  initialEditRowId = null,
   onTabChange,
+  onEditingRowChange,
   onClose,
   onNotify,
   onOpen360Scenes,
 }: {
   activeTab: 'hero_slides' | 'sedes' | 'habitaciones' | 'servicios' | 'promociones';
+  initialEditRowId?: string | null;
   onTabChange: (t: 'hero_slides' | 'sedes' | 'habitaciones' | 'servicios' | 'promociones') => void;
+  onEditingRowChange?: (id: string | null) => void;
   onClose: () => void;
   onNotify: (msg: string) => void;
-  onOpen360Scenes: (entity: AdminEditableEntity) => void;
+  onOpen360Scenes: (entity: AdminEditableEntity, sourceRowId?: string) => void;
 }) {
   const [heroSlides, setHeroSlides] = useState<DbHeroSlide[]>([]);
   const [sedes, setSedes] = useState<DbSede[]>([]);
@@ -1407,12 +1749,14 @@ function RelationalCrudModal({
   const [uploadingRowId, setUploadingRowId] = useState<string | null>(null);
   const [rowUploadProgress, setRowUploadProgress] = useState<number>(0);
   const [creatingHeroMedia, setCreatingHeroMedia] = useState(false);
-  const [editingRowId, setEditingRowId] = useState<string | null>(null);
+  const [editingRowId, setEditingRowId] = useState<string | null>(initialEditRowId);
   const [editDraft, setEditDraft] = useState<Record<string, any>>({});
   const [customUploadName, setCustomUploadName] = useState<string>('');
   const [renamingRowId, setRenamingRowId] = useState<string | null>(null);
   const [renameRowDraft, setRenameRowDraft] = useState<string>('');
   const [isRenamingRow, setIsRenamingRow] = useState<boolean>(false);
+  const [quickRenameRowId, setQuickRenameRowId] = useState<string | null>(null);
+  const [quickRenameDraft, setQuickRenameDraft] = useState<string>('');
   const rowFileRef = useRef<HTMLInputElement>(null);
   const heroCreateFileRef = useRef<HTMLInputElement>(null);
   const targetRowIdRef = useRef<string | null>(null);
@@ -1421,11 +1765,36 @@ function RelationalCrudModal({
     if (editingRowId === row.id) {
       setEditingRowId(null);
       setEditDraft({});
+      onEditingRowChange?.(null);
       return;
     }
     setEditingRowId(row.id);
     setEditDraft({ ...row });
+    onEditingRowChange?.(row.id);
   };
+
+  useEffect(() => {
+    if (!initialEditRowId) {
+      setEditingRowId(null);
+      setEditDraft({});
+      return;
+    }
+    const list: Array<Record<string, any>> =
+      activeTab === 'hero_slides'
+        ? heroSlides
+        : activeTab === 'sedes'
+          ? sedes
+          : activeTab === 'habitaciones'
+            ? habitaciones
+            : activeTab === 'servicios'
+              ? servicios
+              : promociones;
+    const found = list.find((r) => r.id === initialEditRowId);
+    if (found) {
+      setEditingRowId(found.id);
+      setEditDraft({ ...found });
+    }
+  }, [initialEditRowId, activeTab, heroSlides, sedes, habitaciones, servicios, promociones]);
 
   const handleSaveEditRow = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1458,9 +1827,39 @@ function RelationalCrudModal({
         setPromociones(promociones.map((r) => (r.id === id ? (data as DbPromocion) : r)));
       }
     }
+    invalidateSupabaseCache();
     setEditingRowId(null);
     setEditDraft({});
+    onEditingRowChange?.(null);
     onNotify(`Cambios guardados en ${TAB_LABELS[activeTab]}`);
+  };
+
+  const handleQuickRenameRow = async (e: React.FormEvent, id: string) => {
+    e.preventDefault();
+    const nextTitle = quickRenameDraft.trim();
+    if (!nextTitle || !supabase) return;
+    const field = activeTab === 'hero_slides' || activeTab === 'promociones' ? 'titulo' : 'nombre';
+    const { data, error } = await supabase
+      .from(activeTab)
+      .update({ [field]: nextTitle })
+      .eq('id', id)
+      .select()
+      .single();
+    if (error) {
+      onNotify(`Error al renombrar: ${error.message}`);
+      return;
+    }
+    if (data) {
+      if (activeTab === 'hero_slides') setHeroSlides(heroSlides.map((r) => (r.id === id ? (data as DbHeroSlide) : r)));
+      if (activeTab === 'sedes') setSedes(sedes.map((r) => (r.id === id ? (data as DbSede) : r)));
+      if (activeTab === 'habitaciones') setHabitaciones(habitaciones.map((r) => (r.id === id ? (data as DbHabitacion) : r)));
+      if (activeTab === 'servicios') setServicios(servicios.map((r) => (r.id === id ? (data as DbServicio) : r)));
+      if (activeTab === 'promociones') setPromociones(promociones.map((r) => (r.id === id ? (data as DbPromocion) : r)));
+    }
+    invalidateSupabaseCache();
+    setQuickRenameRowId(null);
+    setQuickRenameDraft('');
+    onNotify(`Renombrado a "${nextTitle}"`);
   };
 
   useEffect(() => {
@@ -1500,6 +1899,10 @@ function RelationalCrudModal({
             h.id === rowId ? { ...h, media_url: res.mediaUrl, media_tipo: res.mediaTipo } : h
           )
         );
+        if (editingRowId === rowId) {
+          setEditDraft((prev) => ({ ...prev, media_url: res.mediaUrl, media_tipo: res.mediaTipo }));
+        }
+        invalidateSupabaseCache();
         onNotify(`Hero media actualizado en R2 (${res.sizeText})`);
         return;
       }
@@ -1528,19 +1931,24 @@ function RelationalCrudModal({
 
       if (activeTab === 'sedes') {
         setSedes(sedes.map((s) => (s.id === rowId ? { ...s, imagen_portada_url: res.panoramaUrl } : s)));
+        if (editingRowId === rowId) setEditDraft((prev) => ({ ...prev, imagen_portada_url: res.panoramaUrl }));
       } else if (activeTab === 'habitaciones') {
         setHabitaciones(
           habitaciones.map((h) => (h.id === rowId ? { ...h, portada_webp_url: res.panoramaUrl } : h))
         );
+        if (editingRowId === rowId) setEditDraft((prev) => ({ ...prev, portada_webp_url: res.panoramaUrl }));
       } else if (activeTab === 'servicios') {
         setServicios(
           servicios.map((sv) => (sv.id === rowId ? { ...sv, portada_webp_url: res.panoramaUrl } : sv))
         );
+        if (editingRowId === rowId) setEditDraft((prev) => ({ ...prev, portada_webp_url: res.panoramaUrl }));
       } else if (activeTab === 'promociones') {
         setPromociones(
           promociones.map((pr) => (pr.id === rowId ? { ...pr, imagen_webp_url: res.panoramaUrl } : pr))
         );
+        if (editingRowId === rowId) setEditDraft((prev) => ({ ...prev, imagen_webp_url: res.panoramaUrl }));
       }
+      invalidateSupabaseCache();
       onNotify(`Portada subida a R2 + Supabase (${res.fileSizeWebP})`);
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Error subiendo portada a R2');
@@ -1806,8 +2214,11 @@ function RelationalCrudModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4"
-      onClick={onClose}
+      className="w-full rounded-3xl p-5 sm:p-7 text-white shadow-2xl min-h-[78vh] flex flex-col"
+      style={{
+        background: 'rgba(22, 22, 28, 0.96)',
+        border: '1px solid rgba(255, 255, 255, 0.16)',
+      }}
     >
       <input
         ref={rowFileRef}
@@ -1823,21 +2234,19 @@ function RelationalCrudModal({
         onChange={handleCreateHeroWithFile}
         className="hidden"
       />
-      <div
-        className="w-full max-w-3xl rounded-3xl p-6 text-white shadow-2xl max-h-[88vh] flex flex-col"
-        style={{
-          background: 'rgba(22, 22, 28, 0.96)',
-          border: '1px solid rgba(255, 255, 255, 0.16)',
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between pb-4 border-b border-white/10">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-white/10">
           <div className="flex flex-wrap items-center gap-2">
             {(['hero_slides', 'sedes', 'habitaciones', 'servicios', 'promociones'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
-                onClick={() => onTabChange(t)}
+                onClick={() => {
+                  setEditingRowId(null);
+                  setEditDraft({});
+                  setQuickRenameRowId(null);
+                  setRenamingRowId(null);
+                  onTabChange(t);
+                }}
                 className={`px-3.5 py-1.5 rounded-full text-xs font-medium transition-all cursor-pointer ${
                   activeTab === t
                     ? 'bg-white text-[#09090B] font-semibold'
@@ -1848,14 +2257,319 @@ function RelationalCrudModal({
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-full bg-white/5 hover:bg-white/15 text-[#A1A1AA] hover:text-white cursor-pointer"
-          >
-            <X className="w-4 h-4" />
-          </button>
         </div>
+
+        {editingRowId ? (
+          <div className="mt-4 overflow-y-auto flex-1 space-y-5 pr-1">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/10">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingRowId(null);
+                  setEditDraft({});
+                  setRenamingRowId(null);
+                  onEditingRowChange?.(null);
+                }}
+                className="px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs text-white cursor-pointer"
+              >
+                ← Volver a la lista de {TAB_LABELS[activeTab]}
+              </button>
+              <span className="text-sm sm:text-base font-medium text-white truncate">
+                {editDraft.nombre || editDraft.titulo || 'Editar registro'}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+              {/* Left Column: Portada/Media R2 + Escenas 360° */}
+              <div className="lg:col-span-5 rounded-2xl bg-[#16161B] border border-white/12 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-medium text-[#FAFAFA]">
+                    {activeTab === 'hero_slides' ? 'Media Hero R2' : 'Imagen de Portada R2'}
+                  </span>
+                  {(editDraft.media_url ||
+                    editDraft.imagen_portada_url ||
+                    editDraft.portada_webp_url ||
+                    editDraft.imagen_webp_url) && (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-[#4ADE80] text-[10px] font-medium">
+                      <Check className="w-2.5 h-2.5 stroke-[2.5]" />
+                      <span>Subido</span>
+                    </span>
+                  )}
+                </div>
+
+                {(() => {
+                  const mediaSrc =
+                    editDraft.media_url ||
+                    editDraft.imagen_portada_url ||
+                    editDraft.portada_webp_url ||
+                    editDraft.imagen_webp_url ||
+                    '';
+                  const isVid = activeTab === 'hero_slides' && editDraft.media_tipo === 'video';
+                  return mediaSrc ? (
+                    isVid ? (
+                      <video
+                        src={resolveMediaUrl(mediaSrc)}
+                        controls
+                        className="w-full h-48 rounded-xl object-cover bg-black border border-white/10"
+                      />
+                    ) : (
+                      <img
+                        src={resolveMediaUrl(mediaSrc)}
+                        alt=""
+                        className="w-full h-48 rounded-xl object-cover border border-white/10"
+                      />
+                    )
+                  ) : (
+                    <div className="w-full h-40 rounded-xl border border-dashed border-white/20 bg-[#121215] flex items-center justify-center text-xs text-[#71717A] text-center px-4">
+                      Sin portada subida (en la vista pública usará la escena principal 360° si existe)
+                    </div>
+                  );
+                })()}
+
+                <input
+                  type="text"
+                  value={customUploadName}
+                  onChange={(e) => setCustomUploadName(e.target.value)}
+                  placeholder="Nombre archivo R2 al subir (opcional)"
+                  className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-1.5 text-xs text-white placeholder-[#71717A]"
+                />
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      targetRowIdRef.current = editingRowId;
+                      rowFileRef.current?.click();
+                    }}
+                    className="relative overflow-hidden flex-1 px-3 py-2 rounded-xl bg-white text-[#09090B] font-semibold text-xs inline-flex items-center justify-center gap-1.5 hover:bg-neutral-200 cursor-pointer"
+                  >
+                    {uploadingRowId === editingRowId && (
+                      <LiquidUploadFill progress={rowUploadProgress} isComplete={rowUploadProgress === 100} />
+                    )}
+                    <span className="relative z-10 inline-flex items-center gap-1.5">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>
+                        {uploadingRowId === editingRowId
+                          ? `${rowUploadProgress}%`
+                          : 'Subir / Cambiar Portada R2'}
+                      </span>
+                    </span>
+                  </button>
+                  {renderRenameMediaButton(
+                    editingRowId,
+                    editDraft.media_url ||
+                      editDraft.imagen_portada_url ||
+                      editDraft.portada_webp_url ||
+                      editDraft.imagen_webp_url
+                  )}
+                </div>
+
+                {renderRenameMediaForm(
+                  editingRowId,
+                  editDraft.media_url ||
+                    editDraft.imagen_portada_url ||
+                    editDraft.portada_webp_url ||
+                    editDraft.imagen_webp_url
+                )}
+
+                {activeTab !== 'hero_slides' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const slug = editDraft.slug || editingRowId;
+                      const title = editDraft.nombre || editDraft.titulo || 'Entidad';
+                      onOpen360Scenes({
+                        key: `${activeTab}:${slug}`,
+                        entityUuid: editingRowId,
+                        dbEntidadTipo: activeTab === 'servicios' || activeTab === 'promociones' ? 'servicio' : 'habitacion',
+                        category: activeTab,
+                        slug,
+                        title,
+                        subtitle: editDraft.direccion || (editDraft.tarifa ? `S/ ${editDraft.tarifa}` : ''),
+                        fullLabel: `${title} — ${TAB_LABELS[activeTab]}`,
+                        defaultScenes: [],
+                      }, editingRowId);
+                    }}
+                    className="w-full px-4 py-2.5 rounded-xl bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/40 text-pink-200 text-xs font-semibold cursor-pointer transition-colors"
+                  >
+                    Gestionar Escenas 360° y Hotspots →
+                  </button>
+                )}
+              </div>
+
+              {/* Right Column: Full DB Detail Form */}
+              <form
+                onSubmit={handleSaveEditRow}
+                className="lg:col-span-7 rounded-2xl bg-[#16161B] border border-white/12 p-4 sm:p-5 space-y-3"
+              >
+                <h3 className="text-sm font-medium text-white">Detalle completo ({TAB_LABELS[activeTab]})</h3>
+
+                {activeTab === 'hero_slides' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Título</label>
+                      <input type="text" value={editDraft.titulo || ''} onChange={(e) => setEditDraft({ ...editDraft, titulo: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Etiqueta superior</label>
+                      <input type="text" value={editDraft.etiqueta_superior || ''} onChange={(e) => setEditDraft({ ...editDraft, etiqueta_superior: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Orden</label>
+                      <input type="number" value={editDraft.orden ?? 1} onChange={(e) => setEditDraft({ ...editDraft, orden: Number(e.target.value) })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Subtítulo</label>
+                      <textarea rows={2} value={editDraft.subtitulo || ''} onChange={(e) => setEditDraft({ ...editDraft, subtitulo: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Texto botón</label>
+                      <input type="text" value={editDraft.boton_texto || ''} onChange={(e) => setEditDraft({ ...editDraft, boton_texto: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">URL botón</label>
+                      <input type="text" value={editDraft.boton_url || ''} onChange={(e) => setEditDraft({ ...editDraft, boton_url: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'sedes' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Nombre</label>
+                      <input type="text" value={editDraft.nombre || ''} onChange={(e) => setEditDraft({ ...editDraft, nombre: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Slug URL</label>
+                      <input type="text" value={editDraft.slug || ''} onChange={(e) => setEditDraft({ ...editDraft, slug: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Dirección</label>
+                      <input type="text" value={editDraft.direccion || ''} onChange={(e) => setEditDraft({ ...editDraft, direccion: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">WhatsApp</label>
+                      <input type="text" value={editDraft.whatsapp_numero || ''} onChange={(e) => setEditDraft({ ...editDraft, whatsapp_numero: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Orden</label>
+                      <input type="number" value={editDraft.orden ?? 1} onChange={(e) => setEditDraft({ ...editDraft, orden: Number(e.target.value) })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Google Maps URL</label>
+                      <input type="text" value={editDraft.google_maps_url || ''} onChange={(e) => setEditDraft({ ...editDraft, google_maps_url: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Waze URL</label>
+                      <input type="text" value={editDraft.waze_url || ''} onChange={(e) => setEditDraft({ ...editDraft, waze_url: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                  </div>
+                )}
+
+                {(activeTab === 'habitaciones' || activeTab === 'servicios') && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Sede</label>
+                      <select value={editDraft.sede_id || ''} onChange={(e) => setEditDraft({ ...editDraft, sede_id: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white">
+                        {sedes.map((s) => (
+                          <option key={s.id} value={s.id}>{s.nombre}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Slug URL</label>
+                      <input type="text" value={editDraft.slug || ''} onChange={(e) => setEditDraft({ ...editDraft, slug: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Nombre</label>
+                      <input type="text" value={editDraft.nombre || ''} onChange={(e) => setEditDraft({ ...editDraft, nombre: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[11px] text-[#A1A1AA] mb-1">Tarifa</label>
+                        <input type="number" value={editDraft.tarifa ?? 0} onChange={(e) => setEditDraft({ ...editDraft, tarifa: Number(e.target.value) })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] text-[#A1A1AA] mb-1">Moneda</label>
+                        <input type="text" value={editDraft.moneda || 'S/'} onChange={(e) => setEditDraft({ ...editDraft, moneda: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">
+                        {activeTab === 'servicios' ? 'Categoría' : 'Etiqueta promo'}
+                      </label>
+                      <input type="text" value={editDraft.etiqueta_promo || ''} onChange={(e) => setEditDraft({ ...editDraft, etiqueta_promo: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Orden</label>
+                      <input type="number" value={editDraft.orden ?? 1} onChange={(e) => setEditDraft({ ...editDraft, orden: Number(e.target.value) })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Descripción (una línea por viñeta o separada por •)</label>
+                      <textarea rows={4} value={editDraft.descripcion || ''} onChange={(e) => setEditDraft({ ...editDraft, descripcion: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                  </div>
+                )}
+
+                {activeTab === 'promociones' && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Sede</label>
+                      <select value={editDraft.sede_id || ''} onChange={(e) => setEditDraft({ ...editDraft, sede_id: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white">
+                        {sedes.map((s) => (
+                          <option key={s.id} value={s.id}>{s.nombre}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Slug URL</label>
+                      <input type="text" value={editDraft.slug || ''} onChange={(e) => setEditDraft({ ...editDraft, slug: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Título</label>
+                      <input type="text" value={editDraft.titulo || ''} onChange={(e) => setEditDraft({ ...editDraft, titulo: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Precio Promo</label>
+                      <input type="number" value={editDraft.precio_promo ?? 0} onChange={(e) => setEditDraft({ ...editDraft, precio_promo: Number(e.target.value) })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div>
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Precio Regular</label>
+                      <input type="number" value={editDraft.precio_regular ?? 0} onChange={(e) => setEditDraft({ ...editDraft, precio_regular: Number(e.target.value) })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Fecha fin (YYYY-MM-DD)</label>
+                      <input type="text" value={editDraft.fecha_fin || ''} onChange={(e) => setEditDraft({ ...editDraft, fecha_fin: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="block text-[11px] text-[#A1A1AA] mb-1">Descripción (una línea por viñeta o separada por •)</label>
+                      <textarea rows={4} value={editDraft.descripcion || ''} onChange={(e) => setEditDraft({ ...editDraft, descripcion: e.target.value })} className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-2 text-white" />
+                    </div>
+                  </div>
+                )}
+
+                <div className="pt-2 flex items-center justify-between gap-3">
+                  <label className="inline-flex items-center gap-2 text-xs text-[#D4D4D8] cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={editDraft.activo !== false}
+                      onChange={(e) => setEditDraft({ ...editDraft, activo: e.target.checked })}
+                      className="rounded"
+                    />
+                    <span>Activo en catálogo público</span>
+                  </label>
+                  <button
+                    type="submit"
+                    className="rounded-xl bg-white text-[#09090B] font-semibold text-xs py-2.5 px-5 hover:bg-neutral-200 cursor-pointer"
+                  >
+                    Guardar Todos los Cambios
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        ) : (
+          <>
 
         <div className="mt-3">
           <input
@@ -1942,449 +2656,158 @@ function RelationalCrudModal({
           </button>
         </form>
 
-        {/* Records Table */}
+        {/* Records Table: Clean 3-action rows (Renombrar, Editar, Eliminar) */}
         <div className="mt-4 overflow-y-auto flex-1 divide-y divide-white/10 text-xs">
           {activeTab === 'hero_slides' && heroSlides.length === 0 && (
             <div className="py-8 text-center text-[#A1A1AA]">
               Aún no hay slides en la tabla <code>hero_slides</code>. Usa el formulario superior para subir una foto o video MP4 a R2.
             </div>
           )}
-          {activeTab === 'hero_slides' &&
-            heroSlides.map((hs) => (
-              <div key={hs.id} className="py-3 space-y-2.5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {hs.media_tipo === 'video' ? (
-                      <video src={hs.media_url} className="w-14 h-9 rounded-lg object-cover bg-black shrink-0" muted />
-                    ) : (
-                      <img src={hs.media_url} alt="" className="w-14 h-9 rounded-lg object-cover shrink-0" />
-                    )}
-                    <div className="truncate">
-                      <span className="font-semibold text-white">{hs.titulo}</span>
-                      <span className="ml-2 px-2 py-0.5 rounded-full bg-white/10 text-[10px] uppercase">
-                        {hs.media_tipo}
-                      </span>
-                      <span className="text-[#A1A1AA] ml-2">{hs.subtitulo}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    {hs.media_url && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-500/35 text-[#4ADE80] text-[11px] font-medium">
-                        <Check className="w-3 h-3 stroke-[2.5]" />
-                        <span>Subido</span>
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => startEditingRow(hs)}
-                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
-                    >
-                      {editingRowId === hs.id ? 'Cerrar' : 'Editar Textos'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        targetRowIdRef.current = hs.id;
-                        rowFileRef.current?.click();
-                      }}
-                      className={`relative overflow-hidden px-2.5 py-1 rounded-lg inline-flex items-center gap-1 cursor-pointer ${
-                        hs.media_url
-                          ? 'bg-emerald-500/15 border border-emerald-500/35 text-[#4ADE80] hover:bg-emerald-500/25'
-                          : 'bg-white/10 hover:bg-white/20 text-white'
-                      }`}
-                    >
-                      {uploadingRowId === hs.id && (
-                        <LiquidUploadFill progress={rowUploadProgress} isComplete={rowUploadProgress === 100} />
-                      )}
-                      <span className="relative z-10 inline-flex items-center gap-1">
-                        {hs.media_url && <Check className="w-3 h-3 stroke-[2.5]" />}
-                        <span>{uploadingRowId === hs.id ? `${rowUploadProgress}%` : hs.media_url ? 'Media R2' : 'Subir Media R2'}</span>
-                      </span>
-                    </button>
-                    {renderRenameMediaButton(hs.id, hs.media_url)}
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRecord(hs.id)}
-                      className="text-rose-400 hover:underline cursor-pointer"
-                    >
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-                {renderRenameMediaForm(hs.id, hs.media_url)}
-                {editingRowId === hs.id && (
-                  <form onSubmit={handleSaveEditRow} className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-[#16161B] p-3 rounded-2xl border border-white/15">
-                    <input type="text" placeholder="Título" value={editDraft.titulo || ''} onChange={(e) => setEditDraft({ ...editDraft, titulo: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Etiqueta superior" value={editDraft.etiqueta_superior || ''} onChange={(e) => setEditDraft({ ...editDraft, etiqueta_superior: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Subtítulo" value={editDraft.subtitulo || ''} onChange={(e) => setEditDraft({ ...editDraft, subtitulo: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Texto botón" value={editDraft.boton_texto || ''} onChange={(e) => setEditDraft({ ...editDraft, boton_texto: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="URL botón" value={editDraft.boton_url || ''} onChange={(e) => setEditDraft({ ...editDraft, boton_url: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <button type="submit" className="rounded-lg bg-white text-[#09090B] font-semibold text-xs py-1.5 px-3 cursor-pointer">Guardar Cambios</button>
-                  </form>
-                )}
-              </div>
-            ))}
 
-          {activeTab === 'sedes' &&
-            sedes.map((s) => (
-              <div key={s.id} className="py-3 space-y-2.5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    {s.imagen_portada_url && (
-                      <img src={s.imagen_portada_url} alt="" className="w-12 h-8 rounded-lg object-cover" />
-                    )}
-                    <div>
-                      <span className="font-semibold text-white">{s.nombre}</span>
-                      <span className="text-[#A1A1AA] ml-2">({s.direccion})</span>
-                      <span className="text-emerald-400 ml-2">WA: {s.whatsapp_numero}</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onOpen360Scenes({
-                          key: `sedes:${s.slug}`,
-                          entityUuid: s.id,
-                          dbEntidadTipo: 'habitacion',
-                          category: 'sedes',
-                          slug: s.slug,
-                          title: s.nombre,
-                          subtitle: s.direccion,
-                          fullLabel: `${s.nombre} — Exterior & Recepción`,
-                          defaultScenes: [],
-                        })
-                      }
-                      className="px-2.5 py-1 rounded-lg bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/40 text-pink-200 font-medium cursor-pointer"
-                    >
-                      Escenas 360°
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => startEditingRow(s)}
-                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
-                    >
-                      {editingRowId === s.id ? 'Cerrar' : 'Editar Textos'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        targetRowIdRef.current = s.id;
-                        rowFileRef.current?.click();
-                      }}
-                      className={`relative overflow-hidden px-2.5 py-1 rounded-lg inline-flex items-center gap-1 cursor-pointer ${
-                        s.imagen_portada_url
-                          ? 'bg-emerald-500/15 border border-emerald-500/35 text-[#4ADE80] hover:bg-emerald-500/25'
-                          : 'bg-white/10 hover:bg-white/20 text-white'
-                      }`}
-                    >
-                      {uploadingRowId === s.id && (
-                        <LiquidUploadFill progress={rowUploadProgress} isComplete={rowUploadProgress === 100} />
-                      )}
-                      <span className="relative z-10 inline-flex items-center gap-1">
-                        {s.imagen_portada_url && <Check className="w-3 h-3 stroke-[2.5]" />}
-                        <span>{uploadingRowId === s.id ? `${rowUploadProgress}%` : s.imagen_portada_url ? 'Portada R2' : 'Subir Portada R2'}</span>
-                      </span>
-                    </button>
-                    {renderRenameMediaButton(s.id, s.imagen_portada_url)}
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRecord(s.id)}
-                      className="text-rose-400 hover:underline cursor-pointer"
-                    >
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-                {renderRenameMediaForm(s.id, s.imagen_portada_url)}
-                {editingRowId === s.id && (
-                  <form onSubmit={handleSaveEditRow} className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-[#16161B] p-3 rounded-2xl border border-white/15">
-                    <input type="text" placeholder="Nombre" value={editDraft.nombre || ''} onChange={(e) => setEditDraft({ ...editDraft, nombre: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Dirección" value={editDraft.direccion || ''} onChange={(e) => setEditDraft({ ...editDraft, direccion: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="WhatsApp" value={editDraft.whatsapp_numero || ''} onChange={(e) => setEditDraft({ ...editDraft, whatsapp_numero: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Google Maps URL" value={editDraft.google_maps_url || ''} onChange={(e) => setEditDraft({ ...editDraft, google_maps_url: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Waze URL" value={editDraft.waze_url || ''} onChange={(e) => setEditDraft({ ...editDraft, waze_url: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <button type="submit" className="rounded-lg bg-white text-[#09090B] font-semibold text-xs py-1.5 px-3 cursor-pointer">Guardar Cambios</button>
-                  </form>
-                )}
-              </div>
-            ))}
-
-          {activeTab === 'habitaciones' &&
-            habitaciones.map((h) => (
-              <div key={h.id} className="py-3 space-y-2.5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3 min-w-0">
-                    {h.portada_webp_url && (
-                      <img src={h.portada_webp_url} alt="" className="w-12 h-8 rounded-lg object-cover shrink-0" />
-                    )}
-                    <div className="truncate">
-                      <span className="font-semibold text-white">{h.nombre}</span>
-                      <span className="text-pink-400 ml-2">
-                        {h.moneda} {h.tarifa}
-                      </span>
-                      <span className="text-[#A1A1AA] ml-2">{h.descripcion}</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onOpen360Scenes({
-                          key: `habitaciones:${h.slug}`,
-                          entityUuid: h.id,
-                          dbEntidadTipo: 'habitacion',
-                          category: 'habitaciones',
-                          slug: h.slug,
-                          title: h.nombre,
-                          subtitle: `${h.moneda} ${h.tarifa}`,
-                          fullLabel: `${h.nombre} — Habitación`,
-                          defaultScenes: [],
-                        })
-                      }
-                      className="px-2.5 py-1 rounded-lg bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/40 text-pink-200 font-medium cursor-pointer"
-                    >
-                      Escenas 360°
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => startEditingRow(h)}
-                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
-                    >
-                      {editingRowId === h.id ? 'Cerrar' : 'Editar Textos'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        targetRowIdRef.current = h.id;
-                        rowFileRef.current?.click();
-                      }}
-                      className={`relative overflow-hidden px-2.5 py-1 rounded-lg inline-flex items-center gap-1 cursor-pointer ${
-                        h.portada_webp_url
-                          ? 'bg-emerald-500/15 border border-emerald-500/35 text-[#4ADE80] hover:bg-emerald-500/25'
-                          : 'bg-white/10 hover:bg-white/20 text-white'
-                      }`}
-                    >
-                      {uploadingRowId === h.id && (
-                        <LiquidUploadFill progress={rowUploadProgress} isComplete={rowUploadProgress === 100} />
-                      )}
-                      <span className="relative z-10 inline-flex items-center gap-1">
-                        {h.portada_webp_url && <Check className="w-3 h-3 stroke-[2.5]" />}
-                        <span>{uploadingRowId === h.id ? `${rowUploadProgress}%` : h.portada_webp_url ? 'Portada R2' : 'Subir Portada R2'}</span>
-                      </span>
-                    </button>
-                    {renderRenameMediaButton(h.id, h.portada_webp_url)}
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRecord(h.id)}
-                      className="text-rose-400 hover:underline cursor-pointer"
-                    >
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-                {renderRenameMediaForm(h.id, h.portada_webp_url)}
-                {editingRowId === h.id && (
-                  <form onSubmit={handleSaveEditRow} className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-[#16161B] p-3 rounded-2xl border border-white/15">
-                    <select value={editDraft.sede_id || ''} onChange={(e) => setEditDraft({ ...editDraft, sede_id: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white">
-                      {sedes.map((s) => (
-                        <option key={s.id} value={s.id}>{s.nombre}</option>
-                      ))}
-                    </select>
-                    <input type="text" placeholder="Nombre" value={editDraft.nombre || ''} onChange={(e) => setEditDraft({ ...editDraft, nombre: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="number" placeholder="Tarifa" value={editDraft.tarifa ?? 0} onChange={(e) => setEditDraft({ ...editDraft, tarifa: Number(e.target.value) })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Etiqueta promo" value={editDraft.etiqueta_promo || ''} onChange={(e) => setEditDraft({ ...editDraft, etiqueta_promo: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Descripción (separada por •)" value={editDraft.descripcion || ''} onChange={(e) => setEditDraft({ ...editDraft, descripcion: e.target.value })} className="sm:col-span-3 rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <button type="submit" className="rounded-lg bg-white text-[#09090B] font-semibold text-xs py-1.5 px-3 cursor-pointer">Guardar Cambios</button>
-                  </form>
-                )}
-              </div>
-            ))}
-
-          {activeTab === 'servicios' &&
-            servicios.map((sv) => (
-              <div key={sv.id} className="py-3 space-y-2.5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    {sv.portada_webp_url && (
-                      <img src={sv.portada_webp_url} alt="" className="w-12 h-8 rounded-lg object-cover" />
-                    )}
-                    <div>
-                      <span className="font-semibold text-white">{sv.nombre}</span>
-                      <span className="text-pink-400 ml-2">
-                        {sv.moneda} {sv.tarifa}
-                      </span>
-                      <span className="text-[#A1A1AA] ml-2">{sv.descripcion}</span>
-                    </div>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onOpen360Scenes({
-                          key: `servicios:${sv.slug}`,
-                          entityUuid: sv.id,
-                          dbEntidadTipo: 'servicio',
-                          category: 'servicios',
-                          slug: sv.slug,
+          {(() => {
+            const rows: Array<{
+              raw: Record<string, any>;
+              id: string;
+              title: string;
+              subtitle: string;
+              badge?: string;
+              thumb?: string;
+              isVideo?: boolean;
+            }> =
+              activeTab === 'hero_slides'
+                ? heroSlides.map((hs) => ({
+                    raw: hs,
+                    id: hs.id,
+                    title: hs.titulo,
+                    subtitle: hs.subtitulo || '',
+                    badge: hs.media_tipo,
+                    thumb: hs.media_url,
+                    isVideo: hs.media_tipo === 'video',
+                  }))
+                : activeTab === 'sedes'
+                  ? sedes.map((s) => ({
+                      raw: s,
+                      id: s.id,
+                      title: s.nombre,
+                      subtitle: `${s.direccion} • WA: ${s.whatsapp_numero}`,
+                      thumb: s.imagen_portada_url,
+                    }))
+                  : activeTab === 'habitaciones'
+                    ? habitaciones.map((h) => ({
+                        raw: h,
+                        id: h.id,
+                        title: h.nombre,
+                        subtitle: `${h.moneda} ${h.tarifa} • ${h.descripcion}`,
+                        thumb: h.portada_webp_url,
+                      }))
+                    : activeTab === 'servicios'
+                      ? servicios.map((sv) => ({
+                          raw: sv,
+                          id: sv.id,
                           title: sv.nombre,
-                          subtitle: `${sv.moneda} ${sv.tarifa}`,
-                          fullLabel: `${sv.nombre} — Servicios`,
-                          defaultScenes: [],
-                        })
-                      }
-                      className="px-2.5 py-1 rounded-lg bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/40 text-pink-200 font-medium cursor-pointer"
-                    >
-                      Escenas 360°
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => startEditingRow(sv)}
-                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
-                    >
-                      {editingRowId === sv.id ? 'Cerrar' : 'Editar Textos'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        targetRowIdRef.current = sv.id;
-                        rowFileRef.current?.click();
-                      }}
-                      className={`relative overflow-hidden px-2.5 py-1 rounded-lg inline-flex items-center gap-1 cursor-pointer ${
-                        sv.portada_webp_url
-                          ? 'bg-emerald-500/15 border border-emerald-500/35 text-[#4ADE80] hover:bg-emerald-500/25'
-                          : 'bg-white/10 hover:bg-white/20 text-white'
-                      }`}
-                    >
-                      {uploadingRowId === sv.id && (
-                        <LiquidUploadFill progress={rowUploadProgress} isComplete={rowUploadProgress === 100} />
-                      )}
-                      <span className="relative z-10 inline-flex items-center gap-1">
-                        {sv.portada_webp_url && <Check className="w-3 h-3 stroke-[2.5]" />}
-                        <span>{uploadingRowId === sv.id ? `${rowUploadProgress}%` : sv.portada_webp_url ? 'Portada R2' : 'Subir Portada R2'}</span>
-                      </span>
-                    </button>
-                    {renderRenameMediaButton(sv.id, sv.portada_webp_url)}
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteRecord(sv.id)}
-                      className="text-rose-400 hover:underline cursor-pointer"
-                    >
-                      Eliminar
-                    </button>
-                  </div>
-                </div>
-                {renderRenameMediaForm(sv.id, sv.portada_webp_url)}
-                {editingRowId === sv.id && (
-                  <form onSubmit={handleSaveEditRow} className="grid grid-cols-1 sm:grid-cols-4 gap-2 bg-[#16161B] p-3 rounded-2xl border border-white/15">
-                    <select value={editDraft.sede_id || ''} onChange={(e) => setEditDraft({ ...editDraft, sede_id: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white">
-                      {sedes.map((s) => (
-                        <option key={s.id} value={s.id}>{s.nombre}</option>
-                      ))}
-                    </select>
-                    <input type="text" placeholder="Nombre" value={editDraft.nombre || ''} onChange={(e) => setEditDraft({ ...editDraft, nombre: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="number" placeholder="Tarifa" value={editDraft.tarifa ?? 0} onChange={(e) => setEditDraft({ ...editDraft, tarifa: Number(e.target.value) })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Categoría" value={editDraft.etiqueta_promo || ''} onChange={(e) => setEditDraft({ ...editDraft, etiqueta_promo: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Descripción" value={editDraft.descripcion || ''} onChange={(e) => setEditDraft({ ...editDraft, descripcion: e.target.value })} className="sm:col-span-3 rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <button type="submit" className="rounded-lg bg-white text-[#09090B] font-semibold text-xs py-1.5 px-3 cursor-pointer">Guardar Cambios</button>
-                  </form>
-                )}
-              </div>
-            ))}
+                          subtitle: `${sv.moneda} ${sv.tarifa} • ${sv.descripcion}`,
+                          thumb: sv.portada_webp_url,
+                        }))
+                      : promociones.map((pr) => ({
+                          raw: pr,
+                          id: pr.id,
+                          title: pr.titulo,
+                          subtitle: `S/ ${pr.precio_promo} (antes S/ ${pr.precio_regular})`,
+                          thumb: pr.imagen_webp_url,
+                        }));
 
-          {activeTab === 'promociones' &&
-            promociones.map((pr) => (
-              <div key={pr.id} className="py-3 space-y-2.5">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    {pr.imagen_webp_url && (
-                      <img src={pr.imagen_webp_url} alt="" className="w-12 h-8 rounded-lg object-cover" />
+            return rows.map((item) => (
+              <div key={item.id} className="py-3 space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {item.thumb ? (
+                      item.isVideo ? (
+                        <video src={item.thumb} className="w-14 h-9 rounded-lg object-cover bg-black shrink-0" muted />
+                      ) : (
+                        <img src={item.thumb} alt="" className="w-14 h-9 rounded-lg object-cover shrink-0 border border-white/10" />
+                      )
+                    ) : (
+                      <div className="w-14 h-9 rounded-lg bg-white/5 border border-white/10 shrink-0" />
                     )}
-                    <div>
-                      <span className="font-semibold text-white">{pr.titulo}</span>
-                      <span className="text-pink-400 ml-2">S/ {pr.precio_promo}</span>
-                      <span className="text-[#A1A1AA] line-through ml-1.5">
-                        S/ {pr.precio_regular}
-                      </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-white truncate">{item.title}</span>
+                        {item.badge && (
+                          <span className="px-2 py-0.5 rounded-full bg-white/10 text-[10px] uppercase shrink-0">
+                            {item.badge}
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[#A1A1AA] truncate">{item.subtitle}</p>
                     </div>
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 shrink-0">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        onOpen360Scenes({
-                          key: `promociones:${pr.slug}`,
-                          entityUuid: pr.id,
-                          dbEntidadTipo: 'servicio',
-                          category: 'promociones',
-                          slug: pr.slug,
-                          title: pr.titulo,
-                          subtitle: `S/ ${pr.precio_promo}`,
-                          fullLabel: `${pr.titulo} — Promoción`,
-                          defaultScenes: [],
-                        })
-                      }
-                      className="px-2.5 py-1 rounded-lg bg-pink-500/20 hover:bg-pink-500/30 border border-pink-500/40 text-pink-200 font-medium cursor-pointer"
-                    >
-                      Escenas 360°
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => startEditingRow(pr)}
-                      className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
-                    >
-                      {editingRowId === pr.id ? 'Cerrar' : 'Editar Textos'}
-                    </button>
+
+                  <div className="flex items-center gap-2 shrink-0">
                     <button
                       type="button"
                       onClick={() => {
-                        targetRowIdRef.current = pr.id;
-                        rowFileRef.current?.click();
+                        if (quickRenameRowId === item.id) {
+                          setQuickRenameRowId(null);
+                          setQuickRenameDraft('');
+                        } else {
+                          setQuickRenameRowId(item.id);
+                          setQuickRenameDraft(item.title);
+                        }
                       }}
-                      className={`relative overflow-hidden px-2.5 py-1 rounded-lg inline-flex items-center gap-1 cursor-pointer ${
-                        pr.imagen_webp_url
-                          ? 'bg-emerald-500/15 border border-emerald-500/35 text-[#4ADE80] hover:bg-emerald-500/25'
-                          : 'bg-white/10 hover:bg-white/20 text-white'
-                      }`}
+                      className="px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white cursor-pointer"
                     >
-                      {uploadingRowId === pr.id && (
-                        <LiquidUploadFill progress={rowUploadProgress} isComplete={rowUploadProgress === 100} />
-                      )}
-                      <span className="relative z-10 inline-flex items-center gap-1">
-                        {pr.imagen_webp_url && <Check className="w-3 h-3 stroke-[2.5]" />}
-                        <span>{uploadingRowId === pr.id ? `${rowUploadProgress}%` : pr.imagen_webp_url ? 'Portada R2' : 'Subir Portada R2'}</span>
-                      </span>
+                      Renombrar
                     </button>
-                    {renderRenameMediaButton(pr.id, pr.imagen_webp_url)}
                     <button
                       type="button"
-                      onClick={() => handleDeleteRecord(pr.id)}
-                      className="text-rose-400 hover:underline cursor-pointer"
+                      onClick={() => startEditingRow(item.raw)}
+                      className="px-3 py-1.5 rounded-lg bg-white text-[#09090B] font-semibold hover:bg-neutral-200 cursor-pointer"
+                    >
+                      Editar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteRecord(item.id)}
+                      className="px-3 py-1.5 rounded-lg bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 text-rose-400 cursor-pointer"
                     >
                       Eliminar
                     </button>
                   </div>
                 </div>
-                {renderRenameMediaForm(pr.id, pr.imagen_webp_url)}
-                {editingRowId === pr.id && (
-                  <form onSubmit={handleSaveEditRow} className="grid grid-cols-1 sm:grid-cols-3 gap-2 bg-[#16161B] p-3 rounded-2xl border border-white/15">
-                    <select value={editDraft.sede_id || ''} onChange={(e) => setEditDraft({ ...editDraft, sede_id: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white">
-                      {sedes.map((s) => (
-                        <option key={s.id} value={s.id}>{s.nombre}</option>
-                      ))}
-                    </select>
-                    <input type="text" placeholder="Título" value={editDraft.titulo || ''} onChange={(e) => setEditDraft({ ...editDraft, titulo: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="number" placeholder="Precio Promo" value={editDraft.precio_promo ?? 0} onChange={(e) => setEditDraft({ ...editDraft, precio_promo: Number(e.target.value) })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="number" placeholder="Precio Regular" value={editDraft.precio_regular ?? 0} onChange={(e) => setEditDraft({ ...editDraft, precio_regular: Number(e.target.value) })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Fecha fin (YYYY-MM-DD)" value={editDraft.fecha_fin || ''} onChange={(e) => setEditDraft({ ...editDraft, fecha_fin: e.target.value })} className="rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <input type="text" placeholder="Descripción" value={editDraft.descripcion || ''} onChange={(e) => setEditDraft({ ...editDraft, descripcion: e.target.value })} className="sm:col-span-2 rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1.5 text-xs text-white" />
-                    <button type="submit" className="rounded-lg bg-white text-[#09090B] font-semibold text-xs py-1.5 px-3 cursor-pointer">Guardar Cambios</button>
+
+                {quickRenameRowId === item.id && (
+                  <form
+                    onSubmit={(e) => void handleQuickRenameRow(e, item.id)}
+                    className="flex flex-wrap items-center gap-2 bg-[#16161B] p-2.5 rounded-xl border border-white/15"
+                  >
+                    <input
+                      type="text"
+                      value={quickRenameDraft}
+                      onChange={(e) => setQuickRenameDraft(e.target.value)}
+                      placeholder="Nuevo nombre..."
+                      className="flex-1 min-w-[180px] rounded-lg bg-[#09090B] border border-[#27272A] px-3 py-1.5 text-xs text-white focus:outline-none"
+                    />
+                    <button
+                      type="submit"
+                      className="rounded-lg bg-white text-[#09090B] font-semibold text-xs py-1.5 px-3 cursor-pointer"
+                    >
+                      Guardar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickRenameRowId(null)}
+                      className="rounded-lg bg-white/10 text-[#A1A1AA] text-xs py-1.5 px-3 cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
                   </form>
                 )}
               </div>
-            ))}
+            ));
+          })()}
         </div>
-      </div>
+          </>
+        )}
     </div>
   );
 }

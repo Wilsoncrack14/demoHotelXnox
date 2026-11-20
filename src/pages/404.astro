@@ -1,8 +1,11 @@
 ---
 import Layout from '../layouts/Layout.astro';
 import PublicEntityDetail from '../components/PublicEntityDetail';
+import EntityDetailSkeleton from '../components/EntityDetailSkeleton.astro';
 ---
 
 <Layout title="Tour 360° | Hotel Xnox">
-  <PublicEntityDetail client:only="react" />
+  <PublicEntityDetail client:only="react">
+    <EntityDetailSkeleton slot="fallback" />
+  </PublicEntityDetail>
 </Layout>

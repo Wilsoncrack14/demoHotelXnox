@@ -119,6 +119,86 @@ export const supabase: SupabaseClient | null = isSupabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey)
   : null;
 
+const SWR_PREFIX = 'xnox_swr_v1:';
+const SWR_TTL_MS = 5 * 60 * 1000;
+const memoryCache = new Map<string, { ts: number; data: unknown }>();
+const inFlightRequests = new Map<string, Promise<unknown>>();
+
+export function readSwrCache<T>(key: string): T | null {
+  const mem = memoryCache.get(key);
+  if (mem && Date.now() - mem.ts < SWR_TTL_MS) {
+    return mem.data as T;
+  }
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      const raw = window.sessionStorage.getItem(`${SWR_PREFIX}${key}`);
+      if (raw) {
+        const parsed = JSON.parse(raw) as { ts: number; data: T };
+        if (parsed && Date.now() - parsed.ts < SWR_TTL_MS) {
+          memoryCache.set(key, parsed);
+          return parsed.data;
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }
+  return null;
+}
+
+function writeSwrCache<T>(key: string, data: T): void {
+  const entry = { ts: Date.now(), data };
+  memoryCache.set(key, entry);
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      window.sessionStorage.setItem(`${SWR_PREFIX}${key}`, JSON.stringify(entry));
+    } catch {
+      // ignore quota errors
+    }
+  }
+}
+
+export function invalidateSupabaseCache(): void {
+  memoryCache.clear();
+  if (typeof window !== 'undefined' && window.sessionStorage) {
+    try {
+      const toRemove: string[] = [];
+      for (let i = 0; i < window.sessionStorage.length; i++) {
+        const k = window.sessionStorage.key(i);
+        if (k && k.startsWith(SWR_PREFIX)) toRemove.push(k);
+      }
+      toRemove.forEach((k) => window.sessionStorage.removeItem(k));
+    } catch {
+      // ignore
+    }
+  }
+}
+
+async function dedupFetch<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  const existing = inFlightRequests.get(key) as Promise<T> | undefined;
+  if (existing) return existing;
+  const promise = fetcher()
+    .then((res) => {
+      writeSwrCache(key, res);
+      return res;
+    })
+    .finally(() => {
+      inFlightRequests.delete(key);
+    });
+  inFlightRequests.set(key, promise);
+  return promise;
+}
+
+export const getCachedSedes = (): DbSede[] | null => readSwrCache<DbSede[]>('sedes');
+export const getCachedHabitaciones = (sedeId?: string): DbHabitacion[] | null =>
+  readSwrCache<DbHabitacion[]>(`habitaciones:${sedeId || 'all'}`);
+export const getCachedServicios = (sedeId?: string): DbServicio[] | null =>
+  readSwrCache<DbServicio[]>(`servicios:${sedeId || 'all'}`);
+export const getCachedPromociones = (sedeId?: string): DbPromocion[] | null =>
+  readSwrCache<DbPromocion[]>(`promociones:${sedeId || 'all'}`);
+export const getCachedHeroSlides = (): DbHeroSlide[] | null =>
+  readSwrCache<DbHeroSlide[]>('hero_slides');
+
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export function isValidUuid(str?: string): boolean {
@@ -248,115 +328,125 @@ async function getPrimarySceneCoverMap(entityIds: string[]): Promise<Record<stri
 
 export async function fetchSedesFromDb(): Promise<DbSede[]> {
   if (!supabase) return getFallbackDbSedes();
-  try {
-    const { data, error } = await supabase
-      .from('sedes')
-      .select('*')
-      .eq('activo', true)
-      .order('orden', { ascending: true });
-    if (error || !data || data.length === 0) return getFallbackDbSedes();
-    const rows = data as DbSede[];
-    const missingIds = rows.filter((r) => !r.imagen_portada_url).map((r) => r.id);
-    if (missingIds.length > 0) {
-      const coverMap = await getPrimarySceneCoverMap(missingIds);
-      return rows.map((r) => ({
-        ...r,
-        imagen_portada_url: r.imagen_portada_url || coverMap[r.id] || '',
-      }));
+  return dedupFetch('sedes', async () => {
+    try {
+      const { data, error } = await supabase
+        .from('sedes')
+        .select('*')
+        .eq('activo', true)
+        .order('orden', { ascending: true });
+      if (error || !data || data.length === 0) return getFallbackDbSedes();
+      const rows = data as DbSede[];
+      const missingIds = rows.filter((r) => !r.imagen_portada_url).map((r) => r.id);
+      if (missingIds.length > 0) {
+        const coverMap = await getPrimarySceneCoverMap(missingIds);
+        return rows.map((r) => ({
+          ...r,
+          imagen_portada_url: r.imagen_portada_url || coverMap[r.id] || '',
+        }));
+      }
+      return rows;
+    } catch {
+      return getFallbackDbSedes();
     }
-    return rows;
-  } catch {
-    return getFallbackDbSedes();
-  }
+  });
 }
 
 export async function fetchHabitacionesFromDb(sedeId?: string): Promise<DbHabitacion[]> {
   if (!supabase) return getFallbackDbHabitaciones();
-  try {
-    let query = supabase
-      .from('habitaciones')
-      .select('*')
-      .eq('activo', true)
-      .order('orden', { ascending: true });
-    if (sedeId) query = query.eq('sede_id', sedeId);
-    const { data, error } = await query;
-    if (error || !data || data.length === 0) return getFallbackDbHabitaciones();
-    const rows = data as DbHabitacion[];
-    const missingIds = rows.filter((r) => !r.portada_webp_url).map((r) => r.id);
-    if (missingIds.length > 0) {
-      const coverMap = await getPrimarySceneCoverMap(missingIds);
-      return rows.map((r) => ({
-        ...r,
-        portada_webp_url: r.portada_webp_url || coverMap[r.id] || '',
-      }));
+  return dedupFetch(`habitaciones:${sedeId || 'all'}`, async () => {
+    try {
+      let query = supabase
+        .from('habitaciones')
+        .select('*')
+        .eq('activo', true)
+        .order('orden', { ascending: true });
+      if (sedeId) query = query.eq('sede_id', sedeId);
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) return getFallbackDbHabitaciones();
+      const rows = data as DbHabitacion[];
+      const missingIds = rows.filter((r) => !r.portada_webp_url).map((r) => r.id);
+      if (missingIds.length > 0) {
+        const coverMap = await getPrimarySceneCoverMap(missingIds);
+        return rows.map((r) => ({
+          ...r,
+          portada_webp_url: r.portada_webp_url || coverMap[r.id] || '',
+        }));
+      }
+      return rows;
+    } catch {
+      return getFallbackDbHabitaciones();
     }
-    return rows;
-  } catch {
-    return getFallbackDbHabitaciones();
-  }
+  });
 }
 
 export async function fetchServiciosFromDb(sedeId?: string): Promise<DbServicio[]> {
   if (!supabase) return getFallbackDbServicios();
-  try {
-    let query = supabase
-      .from('servicios')
-      .select('*')
-      .eq('activo', true)
-      .order('orden', { ascending: true });
-    if (sedeId) query = query.eq('sede_id', sedeId);
-    const { data, error } = await query;
-    if (error || !data || data.length === 0) return getFallbackDbServicios();
-    const rows = data as DbServicio[];
-    const missingIds = rows.filter((r) => !r.portada_webp_url).map((r) => r.id);
-    if (missingIds.length > 0) {
-      const coverMap = await getPrimarySceneCoverMap(missingIds);
-      return rows.map((r) => ({
-        ...r,
-        portada_webp_url: r.portada_webp_url || coverMap[r.id] || '',
-      }));
+  return dedupFetch(`servicios:${sedeId || 'all'}`, async () => {
+    try {
+      let query = supabase
+        .from('servicios')
+        .select('*')
+        .eq('activo', true)
+        .order('orden', { ascending: true });
+      if (sedeId) query = query.eq('sede_id', sedeId);
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) return getFallbackDbServicios();
+      const rows = data as DbServicio[];
+      const missingIds = rows.filter((r) => !r.portada_webp_url).map((r) => r.id);
+      if (missingIds.length > 0) {
+        const coverMap = await getPrimarySceneCoverMap(missingIds);
+        return rows.map((r) => ({
+          ...r,
+          portada_webp_url: r.portada_webp_url || coverMap[r.id] || '',
+        }));
+      }
+      return rows;
+    } catch {
+      return getFallbackDbServicios();
     }
-    return rows;
-  } catch {
-    return getFallbackDbServicios();
-  }
+  });
 }
 
 export async function fetchPromocionesFromDb(sedeId?: string): Promise<DbPromocion[]> {
   if (!supabase) return getFallbackDbPromociones();
-  try {
-    let query = supabase.from('promociones').select('*').eq('activo', true);
-    if (sedeId) query = query.eq('sede_id', sedeId);
-    const { data, error } = await query;
-    if (error || !data || data.length === 0) return getFallbackDbPromociones();
-    const rows = data as DbPromocion[];
-    const missingIds = rows.filter((r) => !r.imagen_webp_url).map((r) => r.id);
-    if (missingIds.length > 0) {
-      const coverMap = await getPrimarySceneCoverMap(missingIds);
-      return rows.map((r) => ({
-        ...r,
-        imagen_webp_url: r.imagen_webp_url || coverMap[r.id] || '',
-      }));
+  return dedupFetch(`promociones:${sedeId || 'all'}`, async () => {
+    try {
+      let query = supabase.from('promociones').select('*').eq('activo', true);
+      if (sedeId) query = query.eq('sede_id', sedeId);
+      const { data, error } = await query;
+      if (error || !data || data.length === 0) return getFallbackDbPromociones();
+      const rows = data as DbPromocion[];
+      const missingIds = rows.filter((r) => !r.imagen_webp_url).map((r) => r.id);
+      if (missingIds.length > 0) {
+        const coverMap = await getPrimarySceneCoverMap(missingIds);
+        return rows.map((r) => ({
+          ...r,
+          imagen_webp_url: r.imagen_webp_url || coverMap[r.id] || '',
+        }));
+      }
+      return rows;
+    } catch {
+      return getFallbackDbPromociones();
     }
-    return rows;
-  } catch {
-    return getFallbackDbPromociones();
-  }
+  });
 }
 
 export async function fetchHeroSlidesFromDb(): Promise<DbHeroSlide[]> {
   if (!supabase) return [];
-  try {
-    const { data, error } = await supabase
-      .from('hero_slides')
-      .select('*')
-      .eq('activo', true)
-      .order('orden', { ascending: true });
-    if (error || !data) return [];
-    return data as DbHeroSlide[];
-  } catch {
-    return [];
-  }
+  return dedupFetch('hero_slides', async () => {
+    try {
+      const { data, error } = await supabase
+        .from('hero_slides')
+        .select('*')
+        .eq('activo', true)
+        .order('orden', { ascending: true });
+      if (error || !data) return [];
+      return data as DbHeroSlide[];
+    } catch {
+      return [];
+    }
+  });
 }
 
 export async function updateParentEntityCover(
@@ -398,6 +488,27 @@ export async function updateParentEntityCover(
   }
 }
 
+export function getCachedEscenas360(entidadIdOrSlug: string): Scene360[] | null {
+  const targetUuid = resolveEntityUuid(entidadIdOrSlug);
+  if (!isValidUuid(targetUuid)) return null;
+  return readSwrCache<Scene360[]>(`escenas:${targetUuid}`);
+}
+
+const prefetchedPanoramas = new Set<string>();
+
+export function prefetchEntityTour(
+  entidadTipo: 'habitacion' | 'servicio',
+  entidadIdOrSlug: string
+): void {
+  void fetchEscenas360ForEntity(entidadTipo, entidadIdOrSlug, []).then((scenes) => {
+    const firstUrl = scenes[0]?.panoramaUrl;
+    if (firstUrl && !prefetchedPanoramas.has(firstUrl) && typeof window !== 'undefined') {
+      prefetchedPanoramas.add(firstUrl);
+      fetch(firstUrl, { mode: 'cors' }).catch(() => {});
+    }
+  });
+}
+
 export async function fetchEscenas360ForEntity(
   _entidadTipo: 'habitacion' | 'servicio',
   entidadIdOrSlug: string,
@@ -407,59 +518,82 @@ export async function fetchEscenas360ForEntity(
   const targetUuid = resolveEntityUuid(entidadIdOrSlug);
   if (!isValidUuid(targetUuid)) return defaultScenes;
 
-  try {
-    const { data: escenasData, error: escError } = await supabase
-      .from('escenas_360')
-      .select('*')
-      .eq('entidad_id', targetUuid)
-      .order('orden', { ascending: true })
-      .limit(8);
+  return dedupFetch(`escenas:${targetUuid}`, async () => {
+    try {
+      // Single relational query: escenas_360 + hotspots(*) in 1 roundtrip
+      const { data: joinedData, error: joinErr } = await supabase
+        .from('escenas_360')
+        .select('*, hotspots(*)')
+        .eq('entidad_id', targetUuid)
+        .order('orden', { ascending: true })
+        .limit(8);
 
-    if (escError || !escenasData || escenasData.length === 0) {
+      let escenasRows = joinedData as Array<DbEscena360 & { hotspots?: DbHotspot[] }> | null;
+      let dbHotspots: DbHotspot[] = [];
+
+      if (!joinErr && escenasRows) {
+        if (escenasRows.length === 0) return defaultScenes;
+        dbHotspots = escenasRows.flatMap((e) => e.hotspots || []);
+      } else {
+        const { data: escenasData, error: escError } = await supabase
+          .from('escenas_360')
+          .select('*')
+          .eq('entidad_id', targetUuid)
+          .order('orden', { ascending: true })
+          .limit(8);
+
+        if (escError || !escenasData || escenasData.length === 0) {
+          return defaultScenes;
+        }
+        escenasRows = escenasData as DbEscena360[];
+        const escenaIds = escenasRows.map((e) => e.id);
+        const { data: hotspotsData } = await supabase
+          .from('hotspots')
+          .select('*')
+          .in('escena_id', escenaIds);
+        dbHotspots = (hotspotsData || []) as DbHotspot[];
+      }
+
+      return escenasRows.map((esc) => {
+        const hsForScene: Hotspot360[] = dbHotspots
+          .filter((h) => h.escena_id === esc.id)
+          .map((h) => ({
+            id: h.id,
+            type: h.tipo === 'navegacion' ? 'nav' : 'info',
+            label: h.titulo,
+            adminLabel: h.titulo,
+            description: h.descripcion || undefined,
+            targetSceneId: h.escena_destino_id || undefined,
+            imagenDetalleUrl: h.imagen_detalle_url || undefined,
+            precioAdicional: h.precio_adicional ?? undefined,
+            x: 50,
+            y: 50,
+            pitch: Number(h.pitch) || 0,
+            yaw: Number(h.yaw) || 0,
+          }));
+
+        return {
+          id: esc.id,
+          title: esc.titulo,
+          adminTitle: esc.titulo,
+          isPrimary: esc.es_principal,
+          isEquirectangular: true,
+          initialPitch:
+            typeof esc.pitch_inicial === 'number'
+              ? esc.pitch_inicial
+              : Number(esc.pitch_inicial) || 0,
+          initialYaw:
+            typeof esc.yaw_inicial === 'number'
+              ? esc.yaw_inicial
+              : Number(esc.yaw_inicial) || 0,
+          fileSizeWebP: 'WebP R2',
+          panoramaUrl: resolveMediaUrl(esc.imagen_360_webp_url),
+          thumbUrl: resolveMediaUrl(esc.miniatura_webp_url || esc.imagen_360_webp_url),
+          hotspots: hsForScene,
+        };
+      });
+    } catch {
       return defaultScenes;
     }
-
-    const escenaIds = (escenasData as DbEscena360[]).map((e) => e.id);
-    const { data: hotspotsData } = await supabase
-      .from('hotspots')
-      .select('*')
-      .in('escena_id', escenaIds);
-
-    const dbHotspots = (hotspotsData || []) as DbHotspot[];
-
-    return (escenasData as DbEscena360[]).map((esc) => {
-      const hsForScene: Hotspot360[] = dbHotspots
-        .filter((h) => h.escena_id === esc.id)
-        .map((h) => ({
-          id: h.id,
-          type: h.tipo === 'navegacion' ? 'nav' : 'info',
-          label: h.titulo,
-          adminLabel: h.titulo,
-          description: h.descripcion || undefined,
-          targetSceneId: h.escena_destino_id || undefined,
-          imagenDetalleUrl: h.imagen_detalle_url || undefined,
-          precioAdicional: h.precio_adicional ?? undefined,
-          x: 50,
-          y: 50,
-          pitch: Number(h.pitch) || 0,
-          yaw: Number(h.yaw) || 0,
-        }));
-
-      return {
-        id: esc.id,
-        title: esc.titulo,
-        adminTitle: esc.titulo,
-        isPrimary: esc.es_principal,
-        isEquirectangular: true,
-        initialPitch: typeof esc.pitch_inicial === 'number' ? esc.pitch_inicial : Number(esc.pitch_inicial) || 0,
-        initialYaw: typeof esc.yaw_inicial === 'number' ? esc.yaw_inicial : Number(esc.yaw_inicial) || 0,
-        fileSizeWebP: 'WebP R2',
-        panoramaUrl: resolveMediaUrl(esc.imagen_360_webp_url),
-        thumbUrl: resolveMediaUrl(esc.miniatura_webp_url || esc.imagen_360_webp_url),
-        hotspots: hsForScene,
-      };
-    });
-  } catch {
-    return defaultScenes;
-  }
+  });
 }
