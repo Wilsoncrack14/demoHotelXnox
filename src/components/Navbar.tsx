@@ -1,8 +1,13 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { ChevronDown, ArrowLeft, Sliders, Menu, X } from 'lucide-react';
-import { SEDES } from '../data/hotelData';
+import { ChevronDown, ArrowLeft, Menu, X } from 'lucide-react';
 import { WhatsAppIcon } from './WhatsAppIcon';
 import { triggerWhatsAppModal } from '../data/store';
+import {
+  type DbSede,
+  fetchSedesFromDb,
+  getCachedSedes,
+  getFallbackDbSedes,
+} from '../lib/supabase';
 
 interface NavbarProps {
   activeNav?: 'home' | 'sedes' | 'habitaciones' | 'servicios' | 'promociones' | 'admin';
@@ -32,7 +37,19 @@ export default function Navbar({
   const [sedesOpen, setSedesOpen] = useState(false);
   const [roomsOpen, setRoomsOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [mobileSedesOpen, setMobileSedesOpen] = useState(false);
+  const [sedesList, setSedesList] = useState<DbSede[]>(() => getFallbackDbSedes());
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const cached = getCachedSedes();
+    if (cached && cached.length > 0) {
+      setSedesList(cached);
+    }
+    fetchSedesFromDb().then((rows) => {
+      if (rows && rows.length > 0) setSedesList(rows);
+    });
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -120,7 +137,16 @@ export default function Navbar({
   }
 
   return (
-    <header className="fixed top-3 sm:top-4 inset-x-0 z-50 w-full px-3 sm:px-4 md:px-6 xl:px-8" ref={dropdownRef}>
+    <>
+      {mobileMenuOpen && (
+        <div
+          aria-hidden="true"
+          onClick={() => setMobileMenuOpen(false)}
+          className="fixed inset-0 z-40 bg-black/60 backdrop-blur-md md:hidden animate-xnox-fade"
+        />
+      )}
+
+      <header className="fixed top-3 sm:top-4 inset-x-0 z-50 w-full px-3 sm:px-4 md:px-6 xl:px-8" ref={dropdownRef}>
       <nav className="glass-navbar w-full rounded-2xl px-3.5 sm:px-5 md:px-8 xl:px-12 py-2.5 sm:py-3.5 xl:py-4 flex items-center justify-between gap-2 sm:gap-4">
         {/* Left: Brand or Back to Sedes */}
         {variant === 'sede-detail' ? (
@@ -178,15 +204,15 @@ export default function Navbar({
                 }}
               >
                 <div className="px-3 py-1.5 text-[11px] uppercase tracking-wider text-[#A1A1AA] font-medium">
-                  5 Sedes en Lima
+                  {sedesList.length} Sedes en Lima
                 </div>
-                {SEDES.map((s) => (
+                {sedesList.map((s) => (
                   <a
                     key={s.slug}
                     href={`/sedes/${s.slug}`}
                     className="flex items-center justify-between px-3 py-2 rounded-xl text-xs text-[#E4E4E7] hover:bg-white/10 hover:text-white transition-colors"
                   >
-                    <span className="font-medium">{s.name}</span>
+                    <span className="font-medium">{s.nombre}</span>
                     <span className="text-[11px] text-[#A1A1AA]">24h • 360°</span>
                   </a>
                 ))}
@@ -227,15 +253,6 @@ export default function Navbar({
           >
             Promociones
           </a>
-
-          <a
-            href="/admin"
-            className="px-3 py-1.5 rounded-full text-xs text-[#A1A1AA] hover:text-white hover:bg-white/5 inline-flex items-center gap-1.5 border border-transparent hover:border-white/10 transition-all"
-            title="Panel Admin 360°"
-          >
-            <Sliders className="w-3.5 h-3.5 text-pink-500" />
-            <span>Admin</span>
-          </a>
         </div>
 
         {/* Right: White Pill CTA Reservar WhatsApp */}
@@ -271,7 +288,7 @@ export default function Navbar({
       {/* Apple Dark Mode Glassmorphism Mobile Hamburger Menu */}
       {mobileMenuOpen && (
         <div
-          className="md:hidden mt-2 rounded-2xl p-3 shadow-2xl space-y-1.5"
+          className="md:hidden mt-2 rounded-2xl p-3 shadow-2xl space-y-1.5 animate-xnox-menu"
           style={{
             background: 'rgba(18, 18, 22, 0.94)',
             backdropFilter: 'blur(24px) saturate(180%)',
@@ -279,30 +296,51 @@ export default function Navbar({
             border: '1px solid rgba(255, 255, 255, 0.16)',
           }}
         >
-          <a
-            href="/sedes"
-            onClick={() => setMobileMenuOpen(false)}
-            className={`flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-colors ${
-              activeNav === 'sedes'
-                ? 'bg-white/12 text-white font-medium'
-                : 'text-[#E4E4E7] hover:bg-white/10 hover:text-white'
-            }`}
-          >
-            <span>Sedes</span>
-            <span className="text-[11px] text-[#A1A1AA]">5 en Lima</span>
-          </a>
+          <div>
+            <button
+              type="button"
+              onClick={() => setMobileSedesOpen((prev) => !prev)}
+              aria-expanded={mobileSedesOpen}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm transition-colors cursor-pointer ${
+                activeNav === 'sedes'
+                  ? 'bg-white/12 text-white font-medium'
+                  : 'text-[#E4E4E7] hover:bg-white/10 hover:text-white'
+              }`}
+            >
+              <span>Sedes</span>
+              <span className="inline-flex items-center gap-1.5 text-[11px] text-[#A1A1AA]">
+                <span>{sedesList.length} en Lima</span>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 transition-transform duration-200 ${
+                    mobileSedesOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </span>
+            </button>
 
-          <div className="flex flex-wrap gap-1.5 px-2 pb-1">
-            {SEDES.map((s) => (
-              <a
-                key={s.slug}
-                href={`/sedes/${s.slug}`}
-                onClick={() => setMobileMenuOpen(false)}
-                className="px-2.5 py-1 rounded-full bg-white/[0.06] hover:bg-white/15 border border-white/10 text-[11px] text-[#D4D4D8] hover:text-white transition-colors"
-              >
-                {s.shortName}
-              </a>
-            ))}
+            {mobileSedesOpen && (
+              <div className="mt-1 ml-2 pl-2.5 border-l border-white/12 space-y-1 animate-xnox-fade">
+                <a
+                  href="/sedes"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="flex items-center justify-between px-3 py-1.5 rounded-lg text-xs text-[#A1A1AA] hover:text-white hover:bg-white/[0.06] transition-colors"
+                >
+                  <span>Ver todas las sedes</span>
+                  <span>→</span>
+                </a>
+                {sedesList.map((s) => (
+                  <a
+                    key={s.slug}
+                    href={`/sedes/${s.slug}`}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className="flex items-center justify-between px-3 py-1.5 rounded-lg text-xs text-[#D4D4D8] hover:text-white hover:bg-white/[0.08] transition-colors"
+                  >
+                    <span>{s.nombre}</span>
+                    <span className="text-[10px] text-[#71717A]">360°</span>
+                  </a>
+                ))}
+              </div>
+            )}
           </div>
 
           <a
@@ -343,22 +381,9 @@ export default function Navbar({
             <span>Promociones</span>
             <span className="text-[11px] text-pink-400">Ofertas</span>
           </a>
-
-          <div className="pt-1.5 mt-1.5 border-t border-white/10">
-            <a
-              href="/admin"
-              onClick={() => setMobileMenuOpen(false)}
-              className="flex items-center justify-between px-3.5 py-2.5 rounded-xl text-sm text-[#D4D4D8] hover:bg-white/10 hover:text-white transition-colors"
-            >
-              <span className="inline-flex items-center gap-2">
-                <Sliders className="w-4 h-4 text-pink-500" />
-                <span>Panel Admin 360°</span>
-              </span>
-              <span className="text-[11px] text-[#A1A1AA]">Gestión</span>
-            </a>
-          </div>
         </div>
       )}
     </header>
+    </>
   );
 }

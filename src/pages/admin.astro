@@ -1,6 +1,6 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import AdminDashboard from '../components/AdminDashboard';
+import AdminAuthGate from '../components/AdminAuthGate';
 ---
 
 <Layout
@@ -8,5 +8,5 @@ import AdminDashboard from '../components/AdminDashboard';
   hideFloatingButton={true}
   hideFooter={true}
 >
-  <AdminDashboard client:load />
+  <AdminAuthGate client:only="react" />
 </Layout>

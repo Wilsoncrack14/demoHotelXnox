@@ -11,29 +11,55 @@ import {
 } from '../lib/supabase';
 
 export default function HomeBentoCards() {
-  const [suitesImg, setSuitesImg] = useState(() => {
-    const c = getCachedHabitaciones()?.find((r) => r.portada_webp_url);
-    return c ? resolveMediaUrl(c.portada_webp_url) : EMPTY_PLACEHOLDER_IMG;
-  });
-  const [serviciosImg, setServiciosImg] = useState(() => {
-    const c = getCachedServicios()?.find((r) => r.portada_webp_url);
-    return c ? resolveMediaUrl(c.portada_webp_url) : EMPTY_PLACEHOLDER_IMG;
-  });
-  const [sedesImg, setSedesImg] = useState(() => {
-    const c = getCachedSedes()?.find((r) => r.imagen_portada_url);
-    return c ? resolveMediaUrl(c.imagen_portada_url) : EMPTY_PLACEHOLDER_IMG;
-  });
+  const [suitesImg, setSuitesImg] = useState(EMPTY_PLACEHOLDER_IMG);
+  const [serviciosImg, setServiciosImg] = useState(EMPTY_PLACEHOLDER_IMG);
+  const [sedesImg, setSedesImg] = useState(EMPTY_PLACEHOLDER_IMG);
+  const [sedesCount, setSedesCount] = useState(5);
+  const [firstRoomSlug, setFirstRoomSlug] = useState('suite-neon-jacuzzi');
+  const [firstSedeSlug, setFirstSedeSlug] = useState('surco');
 
   useEffect(() => {
+    const cachedRooms = getCachedHabitaciones();
+    const cachedRoomCover = cachedRooms?.find((r) => r.portada_webp_url);
+    if (cachedRoomCover) {
+      setSuitesImg(resolveMediaUrl(cachedRoomCover.portada_webp_url));
+      setFirstRoomSlug(cachedRoomCover.slug);
+    }
+
+    const cachedServices = getCachedServicios();
+    const cachedServiceCover = cachedServices?.find((r) => r.portada_webp_url);
+    if (cachedServiceCover) {
+      setServiciosImg(resolveMediaUrl(cachedServiceCover.portada_webp_url));
+    }
+
+    const cachedSedes = getCachedSedes();
+    if (cachedSedes && cachedSedes.length > 0) {
+      setSedesCount(cachedSedes.length);
+      setFirstSedeSlug(cachedSedes[0].slug);
+      const cachedSedeCover = cachedSedes.find((r) => r.imagen_portada_url);
+      if (cachedSedeCover) setSedesImg(resolveMediaUrl(cachedSedeCover.imagen_portada_url));
+    }
+
     fetchHabitacionesFromDb().then((rows) => {
       const withCover = rows.find((r) => r.portada_webp_url);
-      if (withCover) setSuitesImg(resolveMediaUrl(withCover.portada_webp_url));
+      if (withCover) {
+        setSuitesImg(resolveMediaUrl(withCover.portada_webp_url));
+        setFirstRoomSlug(withCover.slug);
+      } else if (rows[0]) {
+        setFirstRoomSlug(rows[0].slug);
+      }
     });
+
     fetchServiciosFromDb().then((rows) => {
       const withCover = rows.find((r) => r.portada_webp_url);
       if (withCover) setServiciosImg(resolveMediaUrl(withCover.portada_webp_url));
     });
+
     fetchSedesFromDb().then((rows) => {
+      if (rows.length > 0) {
+        setSedesCount(rows.length);
+        setFirstSedeSlug(rows[0].slug);
+      }
       const withCover = rows.find((r) => r.imagen_portada_url);
       if (withCover) setSedesImg(resolveMediaUrl(withCover.imagen_portada_url));
     });
@@ -42,7 +68,7 @@ export default function HomeBentoCards() {
   const cards = [
     {
       title: 'Suites Temáticas',
-      href: '/habitaciones/suite-neon-jacuzzi',
+      href: `/habitaciones/${firstRoomSlug}`,
       image: suitesImg,
     },
     {
@@ -51,8 +77,8 @@ export default function HomeBentoCards() {
       image: serviciosImg,
     },
     {
-      title: '5 Sedes Exclusivas',
-      href: '/sedes/surco',
+      title: `${sedesCount} Sedes Exclusivas`,
+      href: `/sedes/${firstSedeSlug}`,
       image: sedesImg,
     },
   ];

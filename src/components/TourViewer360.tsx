@@ -195,7 +195,7 @@ export default function TourViewer360({
       await viewer.setPanorama(target.panoramaUrl, {
         transition: {
           effect: 'fade',
-          speed: 300,
+          speed: 180,
           rotation: true,
         },
         position: {

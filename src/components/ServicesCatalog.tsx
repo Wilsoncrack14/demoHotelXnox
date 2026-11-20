@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { RotateCw, ArrowRight } from 'lucide-react';
-import { SERVICES, type ServiceItem } from '../data/hotelData';
+import { SERVICES, EMPTY_PLACEHOLDER_IMG, type ServiceItem } from '../data/hotelData';
 import {
   fetchServiciosFromDb,
   getCachedServicios,
@@ -23,6 +23,7 @@ function mapDbServicios(dbRows: DbServicio[]): ServiceItem[] {
       };
     }
     return {
+      id: row.id,
       slug: row.slug,
       title: row.nombre,
       category: (row.etiqueta_promo as ServiceItem['category']) || 'Packs',
@@ -35,7 +36,7 @@ function mapDbServicios(dbRows: DbServicio[]): ServiceItem[] {
       address: 'Av. Benavides 4510, Surco',
       featuredTall: idx === 0,
       has360Badge: true,
-      cardImage: resolveMediaUrl(row.portada_webp_url || '/images/service-jacuzzi.webp'),
+      cardImage: row.portada_webp_url ? resolveMediaUrl(row.portada_webp_url) : EMPTY_PLACEHOLDER_IMG,
       amenitiesTitle: 'Equipamiento:',
       amenities: [row.descripcion],
       scenes: SERVICES[0].scenes,
@@ -56,9 +57,6 @@ export default function ServicesCatalog() {
       setServicesList(mapDbServicios(dbRows));
     });
   }, []);
-
-  const featuredService = servicesList[0] || SERVICES[0]; // Packs de Decoración & Celebraciones
-  const gridServices = servicesList.slice(1); // The 4 cards on the 2x2 grid
 
   const filteredServices =
     selectedCategory === 'Todas'
@@ -101,76 +99,113 @@ export default function ServicesCatalog() {
         })}
       </div>
 
-      {/* Default Asymmetric Bento Layout ("Todas") matching servicios.jpg */}
-      {selectedCategory === 'Todas' ? (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
-          {/* Left Tall Featured Card (4 cols) */}
-          <a
-            href={`/servicios/${featuredService.slug}`}
-            className="lg:col-span-4 group relative rounded-[24px] overflow-hidden bento-card min-h-[460px] lg:min-h-[540px] flex flex-col justify-between p-6"
-          >
-            <img
-              src={featuredService.cardImage}
-              alt={featuredService.title}
-              className="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-104 transition-transform duration-500"
-            />
-            <div
-              className="absolute inset-0"
-              style={{
-                background:
-                  'linear-gradient(180deg, rgba(9,9,11,0.2) 0%, rgba(9,9,11,0.15) 45%, rgba(9,9,11,0.92) 85%, #09090B 100%)',
-              }}
-            />
-
-            {/* Top-left Sede Badge */}
-            <div className="relative z-10">
-              <span className="glass-hotspot inline-flex items-center gap-2.5 px-4 py-1.5 rounded-xl text-xs md:text-sm text-[#FAFAFA] font-medium">
-                <span>Sede Lince</span>
-                <span className="text-white/50">•</span>
-                <span>Sede Surco</span>
-              </span>
-            </div>
-
-            {/* Bottom Content */}
-            <div className="relative z-10 mt-auto pt-40">
-              <h2 className="text-2xl md:text-[28px] font-medium text-[#FAFAFA] leading-[1.18]">
-                {featuredService.title}
-              </h2>
-              <p className="mt-2.5 text-sm md:text-[15px] text-[#A1A1AA]">
-                {featuredService.description}
-              </p>
-
-              <div className="mt-6 flex items-baseline justify-between gap-2">
-                <div className="text-lg md:text-xl font-medium text-[#FAFAFA]">
-                  {featuredService.priceText}{' '}
-                  <span className="text-sm md:text-base text-[#A1A1AA] font-normal">
-                    {featuredService.priceSubtext}
-                  </span>
-                </div>
-                <span className="inline-flex items-center gap-1.5 text-sm md:text-[15px] font-medium text-[#FAFAFA] group-hover:translate-x-1 transition-transform">
-                  <span>Ver Detalles 360°</span>
-                  <ArrowRight className="w-4 h-4" />
-                </span>
-              </div>
-            </div>
-          </a>
-
-          {/* Right 2x2 Bento Grid (8 cols) */}
-          <div className="lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-5">
-            {gridServices.map((service) => (
-              <ServiceGridCard key={service.slug} service={service} />
-            ))}
-          </div>
+      {/* Alternating Bento Blocks of 5 matching /habitaciones */}
+      {filteredServices.length === 0 ? (
+        <div className="rounded-[20px] border border-white/10 bg-[#121215] p-6 text-center text-sm text-[#A1A1AA]">
+          Próximamente servicios disponibles en esta categoría.
         </div>
       ) : (
-        /* Filtered Grid View */
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredServices.map((service) => (
-            <ServiceGridCard key={service.slug} service={service} />
-          ))}
+        <div className="space-y-5">
+          {(() => {
+            const blocks: ServiceItem[][] = [];
+            for (let i = 0; i < filteredServices.length; i += 5) {
+              blocks.push(filteredServices.slice(i, i + 5));
+            }
+            return blocks.map((chunk, blockIdx) => {
+              if (chunk.length < 3) {
+                return (
+                  <div key={blockIdx} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+                    {chunk.map((service) => (
+                      <ServiceGridCard key={service.slug} service={service} />
+                    ))}
+                  </div>
+                );
+              }
+              const tallOnRight = blockIdx % 2 === 1;
+              const featured = chunk[0];
+              const gridItems = chunk.slice(1);
+              return (
+                <div key={blockIdx} className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+                  <FeaturedTallServiceCard
+                    service={featured}
+                    className={tallOnRight ? 'lg:order-2' : 'lg:order-1'}
+                  />
+                  <div
+                    className={`lg:col-span-8 grid grid-cols-1 sm:grid-cols-2 gap-5 ${
+                      tallOnRight ? 'lg:order-1' : 'lg:order-2'
+                    }`}
+                  >
+                    {gridItems.map((service) => (
+                      <ServiceGridCard key={service.slug} service={service} />
+                    ))}
+                  </div>
+                </div>
+              );
+            });
+          })()}
         </div>
       )}
     </section>
+  );
+}
+
+function FeaturedTallServiceCard({
+  service,
+  className = '',
+}: {
+  service: ServiceItem;
+  className?: string;
+}) {
+  return (
+    <a
+      href={`/servicios/${service.slug}`}
+      className={`lg:col-span-4 group relative rounded-[24px] overflow-hidden bento-card min-h-[420px] lg:min-h-[540px] flex flex-col justify-between p-6 ${className}`}
+    >
+      <img
+        src={service.cardImage}
+        alt={service.title}
+        className="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-104 transition-transform duration-500"
+      />
+      <div
+        className="absolute inset-0"
+        style={{
+          background:
+            'linear-gradient(180deg, rgba(9,9,11,0.2) 0%, rgba(9,9,11,0.15) 45%, rgba(9,9,11,0.92) 85%, #09090B 100%)',
+        }}
+      />
+
+      {/* Top-left Sede Badge */}
+      <div className="relative z-10">
+        <span className="glass-hotspot inline-flex items-center gap-2.5 px-4 py-1.5 rounded-xl text-xs md:text-sm text-[#FAFAFA] font-medium">
+          <span>Sede Lince</span>
+          <span className="text-white/50">•</span>
+          <span>Sede Surco</span>
+        </span>
+      </div>
+
+      {/* Bottom Content */}
+      <div className="relative z-10 mt-auto pt-40">
+        <h2 className="text-2xl md:text-[28px] font-medium text-[#FAFAFA] leading-[1.18]">
+          {service.title}
+        </h2>
+        <p className="mt-2.5 text-sm md:text-[15px] text-[#A1A1AA]">
+          {service.description}
+        </p>
+
+        <div className="mt-6 flex items-baseline justify-between gap-2">
+          <div className="text-lg md:text-xl font-medium text-[#FAFAFA]">
+            {service.priceText}{' '}
+            <span className="text-sm md:text-base text-[#A1A1AA] font-normal">
+              {service.priceSubtext}
+            </span>
+          </div>
+          <span className="inline-flex items-center gap-1.5 text-sm md:text-[15px] font-medium text-[#FAFAFA] group-hover:translate-x-1 transition-transform">
+            <span>Ver Detalles 360°</span>
+            <ArrowRight className="w-4 h-4" />
+          </span>
+        </div>
+      </div>
+    </a>
   );
 }
 

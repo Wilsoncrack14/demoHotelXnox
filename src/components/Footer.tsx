@@ -1,61 +1,74 @@
-import React from 'react';
-import { MapPin, Clock, ShieldCheck, Sparkles, ArrowUpRight, Sliders } from 'lucide-react';
-import { SEDES, ROOMS } from '../data/hotelData';
+import React, { useEffect, useState } from 'react';
+import { ArrowUpRight, Clock, ShieldCheck } from 'lucide-react';
 import { WhatsAppIcon } from './WhatsAppIcon';
 import { triggerWhatsAppModal } from '../data/store';
+import {
+  type DbHabitacion,
+  type DbSede,
+  fetchHabitacionesFromDb,
+  fetchSedesFromDb,
+  getCachedHabitaciones,
+  getCachedSedes,
+  getFallbackDbHabitaciones,
+  getFallbackDbSedes,
+} from '../lib/supabase';
 
 export default function Footer() {
-  return (
-    <footer className="relative mt-16 border-t border-[#27272A] bg-[#09090B] text-[#FAFAFA] overflow-hidden">
-      {/* Subtle Ambient Neon Top Glow */}
-      <div
-        className="pointer-events-none absolute -top-24 left-1/2 -translate-x-1/2 w-[680px] h-44 rounded-full opacity-20 blur-3xl"
-        style={{
-          background: 'linear-gradient(90deg, #E11D48 0%, #9333EA 50%, #2563EB 100%)',
-        }}
-      />
+  const [sedesList, setSedesList] = useState<DbSede[]>(() => getFallbackDbSedes());
+  const [roomsList, setRoomsList] = useState<DbHabitacion[]>(() => getFallbackDbHabitaciones());
 
-      <div className="relative z-10 mx-auto w-full max-w-[1260px] px-4 md:px-6 pt-14 pb-12">
-        {/* Top Glassmorphism Conversion Banner */}
-        <div
-          className="rounded-[24px] p-6 md:p-8 mb-12 flex flex-col md:flex-row md:items-center justify-between gap-6"
-          style={{
-            background: 'rgba(22, 22, 27, 0.78)',
-            backdropFilter: 'blur(18px)',
-            border: '1px solid rgba(255, 255, 255, 0.12)',
-            boxShadow: '0 20px 45px -15px rgba(0, 0, 0, 0.8)',
-          }}
-        >
+  useEffect(() => {
+    const cachedSedes = getCachedSedes();
+    if (cachedSedes && cachedSedes.length > 0) setSedesList(cachedSedes);
+
+    const cachedRooms = getCachedHabitaciones();
+    if (cachedRooms && cachedRooms.length > 0) setRoomsList(cachedRooms);
+
+    fetchSedesFromDb().then((rows) => {
+      if (rows && rows.length > 0) setSedesList(rows);
+    });
+    fetchHabitacionesFromDb().then((rows) => {
+      if (rows && rows.length > 0) setRoomsList(rows);
+    });
+  }, []);
+
+  const featuredRooms = roomsList.slice(0, 4);
+  const defaultSedeName = sedesList[0]?.nombre || 'Sede Surco';
+
+  return (
+    <footer className="relative mt-20 border-t border-white/[0.08] bg-[#09090B] text-[#FAFAFA]">
+      <div className="mx-auto w-full max-w-[1260px] px-6 md:px-8 pt-14 pb-10">
+        {/* Minimal Apple-Style Editorial CTA Strip */}
+        <div className="rounded-[28px] bg-white/[0.025] border border-white/[0.08] p-7 sm:p-9 mb-14 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="max-w-xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.06] border border-white/15 text-xs text-[#E4E4E7] mb-3">
-              <Sparkles className="w-3.5 h-3.5 text-pink-500" />
-              <span>Atención 24 Horas • Reserva Confidencial Inmediata</span>
-            </div>
-            <h3 className="text-2xl md:text-3xl font-light uppercase tracking-tight text-[#FAFAFA]">
-              ¿LISTO PARA VIVIR LA EXPERIENCIA XNOX?
+            <span className="inline-block text-[11px] uppercase tracking-[0.22em] text-[#71717A] mb-2">
+              Atención 24/7 • Reserva Confidencial
+            </span>
+            <h3 className="text-2xl sm:text-3xl font-light tracking-tight text-[#FAFAFA] leading-snug">
+              Vive la experiencia Xnox en 360°.
             </h3>
-            <p className="mt-1.5 text-sm md:text-base text-[#A1A1AA]">
-              Explora nuestras suites en 360° y confirma tu ingreso sin esperas en cualquiera de nuestras 5 sedes en Lima.
+            <p className="mt-2 text-sm text-[#A1A1AA] leading-relaxed">
+              Recorre cada suite antes de llegar y confirma tu ingreso directo en nuestras {sedesList.length} sedes de Lima.
             </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
             <a
-              href="/habitaciones/suite-neon-jacuzzi"
-              className="px-5 py-2.5 rounded-full text-xs md:text-sm font-medium text-[#FAFAFA] bg-white/[0.06] hover:bg-white/[0.12] border border-white/20 transition-all"
+              href="/habitaciones"
+              className="px-5 py-2.5 rounded-full text-xs sm:text-sm font-medium text-[#E4E4E7] bg-white/[0.05] hover:bg-white/[0.1] border border-white/12 transition-colors"
             >
-              Explorar Tour 360°
+              Explorar Suites 360°
             </a>
             <button
               type="button"
               onClick={() =>
                 triggerWhatsAppModal({
-                  sede: 'Sede Surco',
-                  itemTitle: 'Suite Neón Jacuzzi',
-                  priceText: 'S/ 180 (4 Horas)',
+                  sede: defaultSedeName,
+                  itemTitle: featuredRooms[0]?.nombre || 'Suite Neón Jacuzzi',
+                  priceText: featuredRooms[0] ? `S/ ${featuredRooms[0].tarifa}` : 'S/ 180 (4 Horas)',
                 })
               }
-              className="px-6 py-2.5 rounded-full bg-white text-[#09090B] font-semibold text-xs md:text-sm inline-flex items-center gap-2 hover:bg-neutral-200 transition-all shadow-md cursor-pointer"
+              className="px-5 py-2.5 rounded-full bg-white text-[#09090B] font-semibold text-xs sm:text-sm inline-flex items-center gap-2 hover:bg-neutral-200 transition-colors cursor-pointer"
             >
               <span>Reservar por WhatsApp</span>
               <WhatsAppIcon className="w-4 h-4 text-[#09090B]" />
@@ -63,102 +76,94 @@ export default function Footer() {
           </div>
         </div>
 
-        {/* Main 4-Column Footer Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-10 pb-12 border-b border-[#27272A]">
-          {/* Col 1: Brand & Trust Badges (4 cols) */}
+        {/* Clean Apple-Inspired Directory */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-10 pb-12 border-b border-white/[0.08]">
+          {/* Brand */}
           <div className="lg:col-span-4 space-y-4">
             <a
               href="/"
-              className="inline-block text-2xl font-light tracking-[0.14em] text-[#FAFAFA]"
+              className="inline-block text-lg font-medium tracking-[0.22em] text-[#FAFAFA]"
             >
               HOTEL XNOX
             </a>
-            <p className="text-sm text-[#A1A1AA] leading-relaxed max-w-sm">
-              Cadena de hoteles boutique en Lima diseñada para experiencias sensoriales, noches románticas y absoluta privacidad con recorridos virtuales en 360°.
+            <p className="text-xs sm:text-sm text-[#71717A] leading-relaxed max-w-xs">
+              Hoteles boutique en Lima diseñados para privacidad absoluta, descanso sensorial y recorridos virtuales 360°.
             </p>
-
-            <div className="pt-2 space-y-2 text-xs text-[#D4D4D8]">
-              <div className="flex items-center gap-2.5">
-                <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
-                <span>Ingreso vehicular privado sin contacto visual</span>
+            <div className="pt-1 space-y-2 text-xs text-[#A1A1AA]">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-3.5 h-3.5 text-[#71717A] shrink-0" />
+                <span>Ingreso vehicular privado</span>
               </div>
-              <div className="flex items-center gap-2.5">
-                <Clock className="w-4 h-4 text-pink-400 shrink-0" />
-                <span>Abierto 24/7 los 365 días del año</span>
+              <div className="flex items-center gap-2">
+                <Clock className="w-3.5 h-3.5 text-[#71717A] shrink-0" />
+                <span>Abierto 24 horas, todos los días</span>
               </div>
             </div>
           </div>
 
-          {/* Col 2: 5 Sedes en Lima (3 cols) */}
+          {/* Sedes */}
           <div className="lg:col-span-3">
-            <h4 className="text-xs font-semibold uppercase tracking-[0.14em] text-[#FAFAFA] mb-4">
-              Nuestras 5 Sedes
+            <h4 className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#71717A] mb-4">
+              Sedes ({sedesList.length})
             </h4>
-            <ul className="space-y-2.5 text-sm">
-              {SEDES.map((sede) => (
+            <ul className="space-y-3 text-xs sm:text-sm">
+              {sedesList.map((sede) => (
                 <li key={sede.slug}>
                   <a
                     href={`/sedes/${sede.slug}`}
-                    className="group flex items-start gap-2 text-[#A1A1AA] hover:text-white transition-colors"
+                    className="group block text-[#D4D4D8] hover:text-white transition-colors"
                   >
-                    <MapPin className="w-3.5 h-3.5 mt-1 text-pink-500/80 group-hover:text-pink-400 shrink-0" />
-                    <div>
-                      <span className="font-medium text-[#E4E4E7] group-hover:text-white">
-                        {sede.name}
+                    <span className="inline-flex items-center gap-1 font-medium">
+                      <span>{sede.nombre}</span>
+                      <ArrowUpRight className="w-3 h-3 opacity-0 -translate-y-0.5 group-hover:opacity-70 transition-all" />
+                    </span>
+                    {sede.direccion && (
+                      <span className="block text-[11px] text-[#71717A] mt-0.5 truncate">
+                        {sede.direccion}
                       </span>
-                      <span className="block text-xs text-[#71717A]">{sede.address}</span>
-                    </div>
+                    )}
                   </a>
                 </li>
               ))}
             </ul>
           </div>
 
-          {/* Col 3: Suites 360° & Experiencias (3 cols) */}
+          {/* Suites 360° */}
           <div className="lg:col-span-3">
-            <h4 className="text-xs font-semibold uppercase tracking-[0.14em] text-[#FAFAFA] mb-4">
-              Suites & Experiencias 360°
+            <h4 className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#71717A] mb-4">
+              Suites Destacadas
             </h4>
-            <ul className="space-y-2.5 text-sm text-[#A1A1AA]">
-              {ROOMS.map((room) => (
+            <ul className="space-y-2.5 text-xs sm:text-sm text-[#A1A1AA]">
+              {featuredRooms.map((room) => (
                 <li key={room.slug}>
                   <a
                     href={`/habitaciones/${room.slug}`}
-                    className="hover:text-white transition-colors inline-flex items-center gap-1"
+                    className="hover:text-white transition-colors flex items-baseline justify-between gap-2"
                   >
-                    <span>{room.title}</span>
-                    <span className="text-xs text-[#71717A]">({room.priceText})</span>
+                    <span className="truncate">{room.nombre}</span>
+                    <span className="text-[11px] text-[#71717A] shrink-0">S/ {room.tarifa}</span>
                   </a>
                 </li>
               ))}
-              <li className="pt-1 border-t border-white/5">
-                <a
-                  href="/servicios/packs-decoracion-celebraciones"
-                  className="hover:text-white transition-colors"
-                >
-                  Packs de Decoración & Celebraciones
+              <li className="pt-2 border-t border-white/[0.06]">
+                <a href="/servicios" className="hover:text-white transition-colors">
+                  Servicios & Experiencias
                 </a>
               </li>
               <li>
-                <a
-                  href="/promociones/pack-celebracion-rosas"
-                  className="hover:text-white transition-colors inline-flex items-center gap-1.5"
-                >
-                  <span>Pack Celebración & Rosas</span>
-                  <span className="px-2 py-0.5 rounded-full bg-[#E11D48] text-[10px] font-semibold text-white">
-                    PROMO
-                  </span>
+                <a href="/promociones" className="hover:text-white transition-colors">
+                  Promociones Vigentes
                 </a>
               </li>
             </ul>
           </div>
 
-          {/* Col 4: Navegación Rápida & Admin (2 cols) */}
+          {/* Navegación */}
           <div className="lg:col-span-2">
-            <h4 className="text-xs font-semibold uppercase tracking-[0.14em] text-[#FAFAFA] mb-4">
+            <h4 className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#71717A] mb-4">
               Explorar
             </h4>
-            <ul className="space-y-2.5 text-sm text-[#A1A1AA]">
+            <ul className="space-y-2.5 text-xs sm:text-sm text-[#A1A1AA]">
               <li>
                 <a href="/" className="hover:text-white transition-colors">
                   Inicio
@@ -166,7 +171,7 @@ export default function Footer() {
               </li>
               <li>
                 <a href="/sedes" className="hover:text-white transition-colors">
-                  Catálogo de Sedes
+                  Sedes
                 </a>
               </li>
               <li>
@@ -176,7 +181,7 @@ export default function Footer() {
               </li>
               <li>
                 <a href="/servicios" className="hover:text-white transition-colors">
-                  Servicios & Juegos
+                  Servicios
                 </a>
               </li>
               <li>
@@ -184,42 +189,32 @@ export default function Footer() {
                   Promociones
                 </a>
               </li>
-              <li className="pt-2">
-                <a
-                  href="/admin"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/10 text-xs text-[#E4E4E7] hover:text-white transition-all"
-                >
-                  <Sliders className="w-3.5 h-3.5 text-pink-500" />
-                  <span>Panel Admin 360°</span>
-                  <ArrowUpRight className="w-3 h-3 opacity-70" />
-                </a>
-              </li>
             </ul>
           </div>
         </div>
 
-        {/* Bottom Copyright & Legal Bar */}
-        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-[#71717A]">
+        {/* Bottom Legal Bar */}
+        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-[11px] text-[#71717A]">
           <div>
-            © {new Date().getFullYear()} HOTEL XNOX Lima, Perú. Todos los derechos reservados. Exclusivo para mayores de 18 años (+18).
+            © {new Date().getFullYear()} HOTEL XNOX Lima, Perú. Todos los derechos reservados. Solo mayores de 18 años (+18).
           </div>
           <div className="flex flex-wrap items-center gap-5">
-            <a href="/promociones" className="hover:text-[#A1A1AA] transition-colors">
+            <a href="/promociones" className="hover:text-[#D4D4D8] transition-colors">
               Términos y Condiciones
             </a>
-            <a href="/servicios" className="hover:text-[#A1A1AA] transition-colors">
-              Política de Privacidad
+            <a href="/servicios" className="hover:text-[#D4D4D8] transition-colors">
+              Privacidad
             </a>
             <button
               type="button"
               onClick={() =>
                 triggerWhatsAppModal({
-                  sede: 'Sede Surco',
+                  sede: defaultSedeName,
                   itemTitle: 'Consulta General / Libro de Reclamaciones',
                   priceText: 'Atención 24/7',
                 })
               }
-              className="hover:text-[#A1A1AA] transition-colors cursor-pointer"
+              className="hover:text-[#D4D4D8] transition-colors cursor-pointer"
             >
               Libro de Reclamaciones
             </button>

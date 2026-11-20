@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Map, Navigation, ExternalLink } from 'lucide-react';
 import Navbar from './Navbar';
 import TourViewer360 from './TourViewer360';
 import LocationBookingCard from './LocationBookingCard';
@@ -142,6 +143,7 @@ export default function PublicEntityDetail({
 
       try {
         if (category === 'habitaciones') {
+          const staticRoom = ROOMS.find((r) => r.slug === slug);
           let dbRoom: DbHabitacion | null = null;
           if (supabase) {
             const { data } = await supabase
@@ -154,20 +156,19 @@ export default function PublicEntityDetail({
 
           if (dbRoom) {
             const dbSede = await loadSedeById(dbRoom.sede_id);
-            const fallbackRoom = ROOMS.find((r) => r.slug === slug);
             const scenes = await fetchEscenas360ForEntity(
               'habitacion',
               dbRoom.id,
-              fallbackRoom?.scenes || []
+              staticRoom?.scenes || []
             );
             const cover =
               resolveMediaUrl(dbRoom.portada_webp_url) ||
               scenes[0]?.thumbUrl ||
               scenes[0]?.panoramaUrl ||
-              fallbackRoom?.ambientImage ||
+              staticRoom?.ambientImage ||
               '';
             const priceLabel = `${dbRoom.moneda || 'S/'} ${dbRoom.tarifa}`;
-            const sedeName = dbSede?.nombre || fallbackRoom?.sedeName || 'Sede Surco';
+            const sedeName = dbSede?.nombre || staticRoom?.sedeName || 'Sede Surco';
 
             if (active) {
               const navBack = resolveBackNav('/habitaciones', 'Volver a habitaciones');
@@ -190,7 +191,7 @@ export default function PublicEntityDetail({
                 wazeUrl: dbSede?.waze_url || 'https://waze.com/ul?q=Av.%20Benavides%204510%20Surco',
                 ambientImage: cover,
                 bulletsTitle: 'Detalles y comodidades:',
-                bullets: parseBullets(dbRoom.descripcion, fallbackRoom?.amenities || []),
+                bullets: parseBullets(dbRoom.descripcion, staticRoom?.amenities || []),
                 scenes,
               });
               setLoading(false);
@@ -200,6 +201,7 @@ export default function PublicEntityDetail({
 
           if (staticRoom && active) {
             const navBack = resolveBackNav('/habitaciones', 'Volver a habitaciones');
+            const staticSede = SEDES.find((s) => s.slug === staticRoom.sedeSlug);
             const scenes = await fetchEscenas360ForEntity(
               'habitacion',
               staticRoom.slug,
@@ -217,8 +219,11 @@ export default function PublicEntityDetail({
               sedeName: staticRoom.sedeName,
               sedeSlug: staticRoom.sedeSlug,
               address: staticRoom.address,
-              googleMapsUrl: staticRoom.googleMapsUrl,
-              wazeUrl: staticRoom.wazeUrl,
+              googleMapsUrl:
+                staticSede?.googleMapsUrl ||
+                'https://maps.google.com/?q=Av.+Benavides+4510+Surco+Lima',
+              wazeUrl:
+                staticSede?.wazeUrl || 'https://waze.com/ul?q=Av.%20Benavides%204510%20Surco',
               ambientImage: staticRoom.ambientImage,
               bulletsTitle: 'Detalles y comodidades:',
               bullets: staticRoom.amenities,
@@ -552,7 +557,7 @@ export default function PublicEntityDetail({
   if (notFound || !entity) {
     return (
       <div className="min-h-screen bg-[#09090B] text-white flex flex-col items-center justify-center px-6 text-center">
-        <Navbar activeNav="inicio" />
+        <Navbar activeNav="home" />
         <p className="text-xs uppercase tracking-[0.22em] text-[#A1A1AA]">404</p>
         <h1 className="mt-2 text-3xl sm:text-4xl font-normal tracking-tight text-[#FAFAFA]">
           Espacio no encontrado
@@ -585,28 +590,39 @@ export default function PublicEntityDetail({
           />
         </div>
 
-        <main className="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-28 sm:pt-26 md:pt-26">
-          <div className="mx-auto max-w-[1260px] flex flex-col lg:flex-row lg:items-center justify-between gap-6 mb-6">
-            <div>
-              <h1 className="text-4xl sm:text-5xl md:text-[54px] font-normal tracking-tight text-[#FAFAFA] leading-none">
+        <main className="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-28 sm:pt-28 md:pt-28">
+          <div className="mx-auto max-w-[1260px] flex flex-col lg:flex-row lg:items-center justify-between gap-3 lg:gap-6 mb-5">
+            <div className="min-w-0">
+              <h1 className="text-2xl sm:text-3xl md:text-4xl font-normal tracking-tight text-[#FAFAFA] leading-tight">
                 {entity.title}
               </h1>
-              <p className="mt-3 text-base md:text-[19px] text-[#A1A1AA]">{entity.subtitle}</p>
-              {entity.scheduleInfo && (
-                <p className="mt-2.5 text-sm md:text-base text-[#E4E4E7]">{entity.scheduleInfo}</p>
-              )}
+              <p className="mt-1 text-xs sm:text-sm text-[#A1A1AA] truncate">
+                {entity.address || entity.subtitle}
+                {entity.scheduleInfo ? ` • ${entity.scheduleInfo}` : ''}
+              </p>
             </div>
 
-            <div className="flex lg:justify-end">
-              <LocationBookingCard
-                compact={true}
-                primaryTitle={entity.address}
-                googleMapsUrl={entity.googleMapsUrl}
-                wazeUrl={entity.wazeUrl}
-                whatsappSede={entity.sedeName}
-                whatsappItem="Suite Neón Jacuzzi"
-                whatsappPrice={entity.priceLabel}
-              />
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              <div className="inline-flex items-center gap-2 px-3.5 py-2 rounded-full bg-white/[0.06] border border-white/12 text-xs text-[#D4D4D8]">
+                <Map className="w-3.5 h-3.5 text-[#A1A1AA] shrink-0" />
+                <a
+                  href={entity.googleMapsUrl || 'https://maps.google.com/?q=Av.+Benavides+4510+Surco+Lima'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-white underline underline-offset-3 transition-colors"
+                >
+                  Google Maps
+                </a>
+                <span className="text-white/40">•</span>
+                <a
+                  href={entity.wazeUrl || 'https://waze.com/ul?q=Av.%20Benavides%204510%20Surco'}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="hover:text-white underline underline-offset-3 transition-colors"
+                >
+                  Waze
+                </a>
+              </div>
             </div>
           </div>
 
@@ -617,7 +633,7 @@ export default function PublicEntityDetail({
             initialScenes={entity.scenes}
             skipInitialFetch={true}
             showThumbnails={true}
-            heightClass="h-[260px] sm:h-[310px] md:h-[340px]"
+            heightClass="h-[260px] sm:h-[340px] md:h-[480px] lg:h-[540px] xl:h-[600px]"
           />
 
           <section className="mx-auto max-w-[1260px] mt-8">
@@ -629,6 +645,65 @@ export default function PublicEntityDetail({
               sedeSlug={entity.slug}
               cardHeightClass="h-[230px] sm:h-[245px]"
             />
+          </section>
+
+          <section className="mx-auto max-w-[1260px] mt-10">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+              <div>
+                <h2 className="text-xl sm:text-2xl md:text-[26px] font-normal text-[#FAFAFA]">
+                  Ubicación de {entity.title}
+                </h2>
+                <p className="mt-1 text-xs sm:text-sm text-[#A1A1AA]">
+                  {entity.address || entity.subtitle}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2.5">
+                <a
+                  href={entity.wazeUrl || `https://waze.com/ul?q=${encodeURIComponent(entity.address || entity.title)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-full bg-white text-[#09090B] font-semibold text-xs sm:text-sm inline-flex items-center gap-2 hover:bg-neutral-200 transition-all shadow-md"
+                >
+                  <Navigation className="w-3.5 h-3.5" />
+                  <span>Abrir en Waze</span>
+                </a>
+                <a
+                  href={entity.googleMapsUrl || `https://maps.google.com/?q=${encodeURIComponent(entity.address || entity.title)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-4 py-2 rounded-full bg-white/[0.08] hover:bg-white/15 border border-white/15 text-xs sm:text-sm text-[#FAFAFA] inline-flex items-center gap-2 transition-colors"
+                >
+                  <ExternalLink className="w-3.5 h-3.5" />
+                  <span>Google Maps</span>
+                </a>
+              </div>
+            </div>
+
+            {(() => {
+              let mapQuery = entity.address || entity.subtitle || entity.title;
+              if (entity.googleMapsUrl) {
+                try {
+                  const parsed = new URL(entity.googleMapsUrl);
+                  const qParam = parsed.searchParams.get('q') || parsed.searchParams.get('query');
+                  if (qParam) mapQuery = qParam;
+                } catch {
+                  // fallback to address
+                }
+              }
+              const embedSrc = `https://maps.google.com/maps?q=${encodeURIComponent(mapQuery)}&z=16&output=embed`;
+              return (
+                <div className="rounded-[24px] overflow-hidden border border-white/12 bg-[#121215]">
+                  <iframe
+                    title={`Mapa ${entity.title}`}
+                    src={embedSrc}
+                    loading="lazy"
+                    referrerPolicy="no-referrer-when-downgrade"
+                    className="w-full h-[300px] sm:h-[360px] md:h-[400px] border-0"
+                  />
+                </div>
+              );
+            })()}
           </section>
         </main>
       </div>

@@ -29,6 +29,7 @@ import {
   uploadHeroMediaToR2,
   renameR2Media,
   getFileNameFromUrl,
+  getFolderPathFromUrl,
 } from '../lib/r2Upload';
 import {
   supabase,
@@ -49,7 +50,13 @@ import {
   type DbHeroSlide,
 } from '../lib/supabase';
 
-export default function AdminDashboard() {
+export default function AdminDashboard({
+  userEmail,
+  onSignOut,
+}: {
+  userEmail?: string;
+  onSignOut?: () => void;
+}) {
   const [allEntities, setAllEntities] = useState<AdminEditableEntity[]>(getAllAdminEntities());
   const [selectedEntityKey, setSelectedEntityKey] = useState<string>('habitaciones:suite-neon-jacuzzi');
 
@@ -155,15 +162,22 @@ export default function AdminDashboard() {
   const [editingHotspotId, setEditingHotspotId] = useState<string | null>(null);
   const [relocatingHotspotId, setRelocatingHotspotId] = useState<string | null>(null);
   const [customSceneFileName, setCustomSceneFileName] = useState<string>('');
+  const [customSceneFolderName, setCustomSceneFolderName] = useState<string>('');
   const [editingSceneR2Name, setEditingSceneR2Name] = useState<boolean>(false);
   const [sceneR2NameDraft, setSceneR2NameDraft] = useState<string>('');
+  const [sceneR2FolderDraft, setSceneR2FolderDraft] = useState<string>('');
   const [isRenamingSceneR2, setIsRenamingSceneR2] = useState<boolean>(false);
   const [cameraAngleDisplay, setCameraAngleDisplay] = useState<{ pitch: number; yaw: number }>({
     pitch: 0,
     yaw: 0,
   });
   const currentCameraAngleRef = useRef<{ pitch: number; yaw: number }>({ pitch: 0, yaw: 0 });
-  const [savedNotice, setSavedNotice] = useState<string>('Conectado a Supabase + R2');
+  const [savedNotice, setSavedNotice] = useState<string>('');
+  useEffect(() => {
+    if (!savedNotice) return;
+    const timer = window.setTimeout(() => setSavedNotice(''), 3500);
+    return () => window.clearTimeout(timer);
+  }, [savedNotice]);
   const [openMenu, setOpenMenu] = useState<'sedes' | 'habitaciones' | 'servicios' | 'promociones' | null>(null);
   const [adminMode, setAdminMode] = useState<'catalog' | '360'>('360');
   const [catalogTab, setCatalogTab] = useState<'hero_slides' | 'sedes' | 'habitaciones' | 'servicios' | 'promociones'>('habitaciones');
@@ -331,14 +345,15 @@ export default function AdminDashboard() {
 
   const handleRenameSceneR2 = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!activeScene || !sceneR2NameDraft.trim() || isRenamingSceneR2) return;
+    if (!activeScene || (!sceneR2NameDraft.trim() && !sceneR2FolderDraft.trim()) || isRenamingSceneR2) return;
     try {
       setIsRenamingSceneR2(true);
-      setSavedNotice('Renombrando archivo en Cloudflare R2...');
+      setSavedNotice('Renombrando ruta en Cloudflare R2...');
       const renamed = await renameR2Media(
         activeScene.panoramaUrl,
         sceneR2NameDraft.trim(),
-        activeScene.thumbUrl
+        activeScene.thumbUrl,
+        sceneR2FolderDraft.trim() || undefined
       );
       if (supabase && isValidUuid(activeScene.id)) {
         const { error } = await supabase
@@ -367,9 +382,10 @@ export default function AdminDashboard() {
             }
           : sc
       );
-      persistScenes(updated, `Archivo R2 renombrado: ${getFileNameFromUrl(renamed.newUrl)}`);
+      persistScenes(updated, `Ruta R2 actualizada: ${renamed.newKey}`);
       setEditingSceneR2Name(false);
       setSceneR2NameDraft('');
+      setSceneR2FolderDraft('');
     } catch (err) {
       setSavedNotice(err instanceof Error ? err.message : 'Error renombrando en R2');
     } finally {
@@ -392,10 +408,12 @@ export default function AdminDashboard() {
           slug: currentEntity.slug,
           kind: 'portada',
           customName: customSceneFileName.trim() || undefined,
+          customFolder: customSceneFolderName.trim() || undefined,
         },
         (pct) => setCoverUploadProgress(pct)
       );
       setCustomSceneFileName('');
+      setCustomSceneFolderName('');
       const coverErr = await updateParentEntityCover(
         currentEntity.category,
         currentEntity.entityUuid,
@@ -540,6 +558,7 @@ export default function AdminDashboard() {
           slug: currentEntity.slug,
           kind: '360',
           customName: customSceneFileName.trim() || undefined,
+          customFolder: customSceneFolderName.trim() || undefined,
         },
         (pct, stage) => {
           setUploadProgress(pct);
@@ -547,6 +566,7 @@ export default function AdminDashboard() {
         }
       );
       setCustomSceneFileName('');
+      setCustomSceneFolderName('');
 
       const nextNum = scenes.length + 1;
       const isPrimary = scenes.length === 0;
@@ -669,6 +689,7 @@ export default function AdminDashboard() {
         currentEntity.entityUuid,
         targetScene.thumbUrl || targetScene.panoramaUrl
       );
+      invalidateSupabaseCache();
     }
   };
 
@@ -682,11 +703,12 @@ export default function AdminDashboard() {
     persistScenes(copy, 'Orden actualizado en Supabase');
     setActiveSceneIdx(targetIdx);
 
-    if (supabase) {
+    const sb = supabase;
+    if (sb) {
       await Promise.all(
         copy.map((sc, i) =>
           isValidUuid(sc.id)
-            ? supabase
+            ? sb
                 .from('escenas_360')
                 .update({ orden: i + 1 })
                 .eq('id', sc.id)
@@ -856,13 +878,29 @@ export default function AdminDashboard() {
               <span>Ver 360° Público</span>
               <ExternalLink className="w-3 h-3" />
             </a>
-            <a
-              href="/"
-              className="px-5 py-1.5 rounded-full text-xs md:text-sm text-white bg-white/15 hover:bg-white/25 border border-white/30 inline-flex items-center gap-1.5 transition-all"
-            >
-              <span>Salir</span>
-              <LogOut className="w-3.5 h-3.5" />
-            </a>
+            {userEmail && (
+              <span className="hidden lg:inline-block text-[11px] text-[#A1A1AA] max-w-[160px] truncate">
+                {userEmail}
+              </span>
+            )}
+            {onSignOut ? (
+              <button
+                type="button"
+                onClick={onSignOut}
+                className="px-5 py-1.5 rounded-full text-xs md:text-sm text-white bg-white/15 hover:bg-white/25 border border-white/30 inline-flex items-center gap-1.5 transition-all cursor-pointer"
+              >
+                <span>Salir</span>
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            ) : (
+              <a
+                href="/"
+                className="px-5 py-1.5 rounded-full text-xs md:text-sm text-white bg-white/15 hover:bg-white/25 border border-white/30 inline-flex items-center gap-1.5 transition-all"
+              >
+                <span>Salir</span>
+                <LogOut className="w-3.5 h-3.5" />
+              </a>
+            )}
           </div>
         </nav>
       </header>
@@ -918,15 +956,9 @@ export default function AdminDashboard() {
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2.5">
-                  <span
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium text-[#4ADE80]"
-                    style={{
-                      background: 'rgba(20, 83, 45, 0.45)',
-                      border: '1px solid rgba(74, 222, 128, 0.35)',
-                    }}
-                  >
-                    <Check className="w-3.5 h-3.5 stroke-[2.5]" />
-                    <span>{loadingScenes ? 'Cargando...' : savedNotice}</span>
+                  <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] text-[#71717A] mr-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80" />
+                    <span>{loadingScenes ? 'Cargando...' : 'Supabase + R2'}</span>
                   </span>
 
                   <button
@@ -1184,6 +1216,13 @@ export default function AdminDashboard() {
                 <div className="space-y-1.5 pt-1">
                   <input
                     type="text"
+                    value={customSceneFolderName}
+                    onChange={(e) => setCustomSceneFolderName(e.target.value)}
+                    placeholder={`Carpeta R2 (opcional, def: ${currentEntity.category}/${currentEntity.slug}/360)`}
+                    className="w-full rounded-xl bg-[#121215] border border-white/15 px-3 py-2 text-xs text-white placeholder-[#71717A] focus:outline-none focus:border-white/40"
+                  />
+                  <input
+                    type="text"
                     value={customSceneFileName}
                     onChange={(e) => setCustomSceneFileName(e.target.value)}
                     placeholder="Nombre archivo R2 (opcional, ej: vista-jacuzzi)"
@@ -1270,23 +1309,36 @@ export default function AdminDashboard() {
                         setSceneR2NameDraft(
                           getFileNameFromUrl(activeScene.panoramaUrl).replace(/\.[^.]+$/, '')
                         );
+                        setSceneR2FolderDraft(getFolderPathFromUrl(activeScene.panoramaUrl));
                         setEditingSceneR2Name(true);
                       }}
-                      title="Renombrar archivo en Cloudflare R2"
+                      title={`Renombrar carpeta o archivo R2 (${getFolderPathFromUrl(activeScene.panoramaUrl) || 'raíz'}/${getFileNameFromUrl(activeScene.panoramaUrl)})`}
                       className="inline-flex items-center gap-1.5 rounded-xl bg-white/10 hover:bg-white/20 px-3 py-1.5 text-xs text-[#E4E4E7] cursor-pointer"
                     >
                       <Pencil className="w-3 h-3" />
-                      <span className="max-w-[160px] truncate">
-                        {getFileNameFromUrl(activeScene.panoramaUrl) || 'Renombrar R2'}
+                      <span className="max-w-[220px] truncate">
+                        {getFolderPathFromUrl(activeScene.panoramaUrl)
+                          ? `${getFolderPathFromUrl(activeScene.panoramaUrl)}/${getFileNameFromUrl(activeScene.panoramaUrl)}`
+                          : getFileNameFromUrl(activeScene.panoramaUrl) || 'Renombrar R2'}
                       </span>
                     </button>
                   ) : (
                     <form onSubmit={handleRenameSceneR2} className="inline-flex flex-wrap items-center gap-1.5">
                       <input
                         type="text"
+                        value={sceneR2FolderDraft}
+                        onChange={(e) => setSceneR2FolderDraft(e.target.value)}
+                        placeholder="carpeta/en/r2"
+                        title="Carpeta en R2"
+                        className="rounded-lg bg-[#121215] border border-white/25 px-2.5 py-1 text-xs text-white focus:outline-none min-w-[160px]"
+                      />
+                      <span className="text-xs text-[#71717A]">/</span>
+                      <input
+                        type="text"
                         value={sceneR2NameDraft}
                         onChange={(e) => setSceneR2NameDraft(e.target.value)}
-                        placeholder="nuevo-nombre-r2"
+                        placeholder="nombre-archivo"
+                        title="Nombre archivo en R2"
                         className="rounded-lg bg-[#121215] border border-white/25 px-2.5 py-1 text-xs text-white focus:outline-none"
                       />
                       <button
@@ -1559,6 +1611,25 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
+      {savedNotice && (
+        <div
+          role="status"
+          title={savedNotice}
+          className="fixed bottom-5 right-5 z-[110] max-w-sm flex items-center gap-2 px-3.5 py-2 rounded-xl bg-[#16161B]/95 backdrop-blur-md border border-emerald-400/35 text-xs text-[#E4E4E7] shadow-2xl"
+        >
+          <Check className="w-3.5 h-3.5 text-[#4ADE80] shrink-0 stroke-[2.5]" />
+          <span className="truncate">{savedNotice}</span>
+          <button
+            type="button"
+            onClick={() => setSavedNotice('')}
+            aria-label="Cerrar aviso"
+            className="ml-1 text-[#71717A] hover:text-white cursor-pointer shrink-0"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -1752,8 +1823,10 @@ function RelationalCrudModal({
   const [editingRowId, setEditingRowId] = useState<string | null>(initialEditRowId);
   const [editDraft, setEditDraft] = useState<Record<string, any>>({});
   const [customUploadName, setCustomUploadName] = useState<string>('');
+  const [customUploadFolder, setCustomUploadFolder] = useState<string>('');
   const [renamingRowId, setRenamingRowId] = useState<string | null>(null);
   const [renameRowDraft, setRenameRowDraft] = useState<string>('');
+  const [renameRowFolderDraft, setRenameRowFolderDraft] = useState<string>('');
   const [isRenamingRow, setIsRenamingRow] = useState<boolean>(false);
   const [quickRenameRowId, setQuickRenameRowId] = useState<string | null>(null);
   const [quickRenameDraft, setQuickRenameDraft] = useState<string>('');
@@ -1883,9 +1956,11 @@ function RelationalCrudModal({
         const res = await uploadHeroMediaToR2(
           file,
           (pct) => setRowUploadProgress(pct),
-          customUploadName.trim() || undefined
+          customUploadName.trim() || undefined,
+          customUploadFolder.trim() || undefined
         );
         setCustomUploadName('');
+        setCustomUploadFolder('');
         if (supabase) {
           const { error } = await supabase
             .from('hero_slides')
@@ -1921,10 +1996,12 @@ function RelationalCrudModal({
           slug: slugForRow,
           kind: 'portada',
           customName: customUploadName.trim() || undefined,
+          customFolder: customUploadFolder.trim() || undefined,
         },
         (pct) => setRowUploadProgress(pct)
       );
       setCustomUploadName('');
+      setCustomUploadFolder('');
       const coverErr = await updateParentEntityCover(activeTab, rowId, res.panoramaUrl);
       if (coverErr) throw new Error(coverErr);
       setRowUploadProgress(100);
@@ -1971,9 +2048,11 @@ function RelationalCrudModal({
       const res = await uploadHeroMediaToR2(
         file,
         (pct) => setRowUploadProgress(pct),
-        customUploadName.trim() || undefined
+        customUploadName.trim() || undefined,
+        customUploadFolder.trim() || undefined
       );
       setCustomUploadName('');
+      setCustomUploadFolder('');
       const { data, error } = await supabase
         .from('hero_slides')
         .insert({
@@ -2108,10 +2187,15 @@ function RelationalCrudModal({
 
   const handleRenameRowMedia = async (e: React.FormEvent, rowId: string, currentUrl: string) => {
     e.preventDefault();
-    if (!renameRowDraft.trim() || isRenamingRow) return;
+    if ((!renameRowDraft.trim() && !renameRowFolderDraft.trim()) || isRenamingRow) return;
     try {
       setIsRenamingRow(true);
-      const renamed = await renameR2Media(currentUrl, renameRowDraft.trim());
+      const renamed = await renameR2Media(
+        currentUrl,
+        renameRowDraft.trim(),
+        undefined,
+        renameRowFolderDraft.trim() || undefined
+      );
       if (activeTab === 'hero_slides') {
         if (supabase) {
           const { error } = await supabase
@@ -2142,9 +2226,10 @@ function RelationalCrudModal({
           );
         }
       }
-      onNotify(`Archivo R2 renombrado a: ${getFileNameFromUrl(renamed.newUrl)}`);
+      onNotify(`Ruta R2 actualizada: ${renamed.newKey}`);
       setRenamingRowId(null);
       setRenameRowDraft('');
+      setRenameRowFolderDraft('');
     } catch (err) {
       onNotify(err instanceof Error ? err.message : 'Error renombrando archivo en R2');
     } finally {
@@ -2162,12 +2247,14 @@ function RelationalCrudModal({
           if (isOpen) {
             setRenamingRowId(null);
             setRenameRowDraft('');
+            setRenameRowFolderDraft('');
           } else {
             setRenamingRowId(rowId);
             setRenameRowDraft(getFileNameFromUrl(currentUrl).replace(/\.[^.]+$/, ''));
+            setRenameRowFolderDraft(getFolderPathFromUrl(currentUrl));
           }
         }}
-        title={`Renombrar archivo R2 (${getFileNameFromUrl(currentUrl)})`}
+        title={`Renombrar carpeta o archivo R2 (${getFolderPathFromUrl(currentUrl) || 'raíz'}/${getFileNameFromUrl(currentUrl)})`}
         className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-[#E4E4E7] inline-flex items-center gap-1 cursor-pointer"
       >
         <Pencil className="w-3 h-3" />
@@ -2178,20 +2265,31 @@ function RelationalCrudModal({
 
   const renderRenameMediaForm = (rowId: string, currentUrl?: string | null) => {
     if (renamingRowId !== rowId || !currentUrl) return null;
+    const currentFolder = getFolderPathFromUrl(currentUrl);
     return (
       <form
         onSubmit={(e) => void handleRenameRowMedia(e, rowId, currentUrl)}
         className="flex flex-wrap items-center gap-2 bg-[#16161B] p-2.5 rounded-xl border border-white/15"
       >
-        <span className="text-[11px] text-[#A1A1AA]">
-          Actual: <strong className="text-white">{getFileNameFromUrl(currentUrl)}</strong>
+        <span className="text-[11px] text-[#A1A1AA] w-full">
+          Actual: <strong className="text-white">{currentFolder ? `${currentFolder}/${getFileNameFromUrl(currentUrl)}` : getFileNameFromUrl(currentUrl)}</strong>
         </span>
+        <input
+          type="text"
+          value={renameRowFolderDraft}
+          onChange={(e) => setRenameRowFolderDraft(e.target.value)}
+          placeholder="carpeta/en/r2"
+          title="Carpeta en R2"
+          className="flex-1 min-w-[160px] rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1 text-xs text-white focus:outline-none"
+        />
+        <span className="text-xs text-[#71717A]">/</span>
         <input
           type="text"
           value={renameRowDraft}
           onChange={(e) => setRenameRowDraft(e.target.value)}
           placeholder="nuevo-nombre-archivo"
-          className="flex-1 min-w-[160px] rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1 text-xs text-white focus:outline-none"
+          title="Nombre archivo en R2"
+          className="flex-1 min-w-[140px] rounded-lg bg-[#09090B] border border-[#27272A] px-2.5 py-1 text-xs text-white focus:outline-none"
         />
         <button
           type="submit"
@@ -2262,21 +2360,40 @@ function RelationalCrudModal({
         {editingRowId ? (
           <div className="mt-4 overflow-y-auto flex-1 space-y-5 pr-1">
             <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-white/10">
-              <button
-                type="button"
-                onClick={() => {
-                  setEditingRowId(null);
-                  setEditDraft({});
-                  setRenamingRowId(null);
-                  onEditingRowChange?.(null);
-                }}
-                className="px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs text-white cursor-pointer"
-              >
-                ← Volver a la lista de {TAB_LABELS[activeTab]}
-              </button>
-              <span className="text-sm sm:text-base font-medium text-white truncate">
-                {editDraft.nombre || editDraft.titulo || 'Editar registro'}
-              </span>
+              <div className="flex items-center gap-3 min-w-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEditingRowId(null);
+                    setEditDraft({});
+                    setRenamingRowId(null);
+                    onEditingRowChange?.(null);
+                  }}
+                  className="shrink-0 px-3.5 py-1.5 rounded-full bg-white/10 hover:bg-white/20 text-xs text-white cursor-pointer"
+                >
+                  ← Volver a la lista de {TAB_LABELS[activeTab]}
+                </button>
+                <span className="text-sm sm:text-base font-medium text-white truncate">
+                  {editDraft.nombre || editDraft.titulo || 'Editar registro'}
+                </span>
+              </div>
+
+              <div className="flex flex-wrap sm:flex-nowrap items-center gap-2 w-full lg:w-auto lg:min-w-[440px]">
+                <input
+                  type="text"
+                  value={customUploadFolder}
+                  onChange={(e) => setCustomUploadFolder(e.target.value)}
+                  placeholder="Carpeta R2 al subir (opcional)"
+                  className="flex-1 min-w-[160px] rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-1.5 text-xs text-white placeholder-[#71717A] focus:outline-none focus:border-white/30"
+                />
+                <input
+                  type="text"
+                  value={customUploadName}
+                  onChange={(e) => setCustomUploadName(e.target.value)}
+                  placeholder="Nombre archivo R2 al subir (opcional)"
+                  className="flex-1 min-w-[160px] rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-1.5 text-xs text-white placeholder-[#71717A] focus:outline-none focus:border-white/30"
+                />
+              </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
@@ -2325,14 +2442,6 @@ function RelationalCrudModal({
                     </div>
                   );
                 })()}
-
-                <input
-                  type="text"
-                  value={customUploadName}
-                  onChange={(e) => setCustomUploadName(e.target.value)}
-                  placeholder="Nombre archivo R2 al subir (opcional)"
-                  className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-1.5 text-xs text-white placeholder-[#71717A]"
-                />
 
                 <div className="flex flex-wrap items-center gap-2">
                   <button
@@ -2571,7 +2680,14 @@ function RelationalCrudModal({
         ) : (
           <>
 
-        <div className="mt-3">
+        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <input
+            type="text"
+            value={customUploadFolder}
+            onChange={(e) => setCustomUploadFolder(e.target.value)}
+            placeholder="Carpeta R2 al subir (opcional, ej: habitaciones/suite-lince/portada)"
+            className="w-full rounded-xl bg-[#09090B] border border-[#27272A] px-3 py-1.5 text-xs text-white placeholder-[#71717A] focus:outline-none focus:border-white/30"
+          />
           <input
             type="text"
             value={customUploadName}

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { PROMOTIONS, type PromoItem } from '../data/hotelData';
+import { PROMOTIONS, EMPTY_PLACEHOLDER_IMG, type PromoItem } from '../data/hotelData';
 import { triggerWhatsAppModal } from '../data/store';
 import {
   fetchPromocionesFromDb,
@@ -24,6 +24,7 @@ function mapDbPromos(dbRows: DbPromocion[]): PromoItem[] {
       };
     }
     return {
+      id: row.id,
       slug: row.slug,
       title: row.titulo,
       detailHeaderTitle: `${row.titulo} — Promoción Especial`,
@@ -33,7 +34,7 @@ function mapDbPromos(dbRows: DbPromocion[]): PromoItem[] {
       validUntil: row.fecha_fin || '31 Dic 2026',
       oldPrice: `S/ ${row.precio_regular}`,
       promoPrice: `S/ ${row.precio_promo}`,
-      cardImage: resolveMediaUrl(row.imagen_webp_url || '/images/promo-noche-romantica.webp'),
+      cardImage: row.imagen_webp_url ? resolveMediaUrl(row.imagen_webp_url) : EMPTY_PLACEHOLDER_IMG,
       availabilityTitle: 'Disponible en Todas las Sedes',
       includesList: [row.descripcion],
       scenes: PROMOTIONS[0].scenes,

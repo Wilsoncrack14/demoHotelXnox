@@ -22,6 +22,7 @@ export interface DbSede {
   imagen_portada_url: string;
   orden: number;
   activo: boolean;
+  created_at?: string;
 }
 
 export interface DbHabitacion {
@@ -36,6 +37,7 @@ export interface DbHabitacion {
   etiqueta_promo: string | null;
   orden: number;
   activo: boolean;
+  created_at?: string;
 }
 
 export interface DbServicio {
@@ -337,12 +339,12 @@ export async function fetchSedesFromDb(): Promise<DbSede[]> {
         .order('orden', { ascending: true });
       if (error || !data || data.length === 0) return getFallbackDbSedes();
       const rows = data as DbSede[];
-      const missingIds = rows.filter((r) => !r.imagen_portada_url).map((r) => r.id);
+      const missingIds = rows.filter((r) => !r.imagen_portada_url?.trim()).map((r) => r.id);
       if (missingIds.length > 0) {
         const coverMap = await getPrimarySceneCoverMap(missingIds);
         return rows.map((r) => ({
           ...r,
-          imagen_portada_url: r.imagen_portada_url || coverMap[r.id] || '',
+          imagen_portada_url: r.imagen_portada_url?.trim() || coverMap[r.id] || '',
         }));
       }
       return rows;
@@ -365,12 +367,12 @@ export async function fetchHabitacionesFromDb(sedeId?: string): Promise<DbHabita
       const { data, error } = await query;
       if (error || !data || data.length === 0) return getFallbackDbHabitaciones();
       const rows = data as DbHabitacion[];
-      const missingIds = rows.filter((r) => !r.portada_webp_url).map((r) => r.id);
+      const missingIds = rows.filter((r) => !r.portada_webp_url?.trim()).map((r) => r.id);
       if (missingIds.length > 0) {
         const coverMap = await getPrimarySceneCoverMap(missingIds);
         return rows.map((r) => ({
           ...r,
-          portada_webp_url: r.portada_webp_url || coverMap[r.id] || '',
+          portada_webp_url: r.portada_webp_url?.trim() || coverMap[r.id] || '',
         }));
       }
       return rows;
@@ -393,12 +395,12 @@ export async function fetchServiciosFromDb(sedeId?: string): Promise<DbServicio[
       const { data, error } = await query;
       if (error || !data || data.length === 0) return getFallbackDbServicios();
       const rows = data as DbServicio[];
-      const missingIds = rows.filter((r) => !r.portada_webp_url).map((r) => r.id);
+      const missingIds = rows.filter((r) => !r.portada_webp_url?.trim()).map((r) => r.id);
       if (missingIds.length > 0) {
         const coverMap = await getPrimarySceneCoverMap(missingIds);
         return rows.map((r) => ({
           ...r,
-          portada_webp_url: r.portada_webp_url || coverMap[r.id] || '',
+          portada_webp_url: r.portada_webp_url?.trim() || coverMap[r.id] || '',
         }));
       }
       return rows;
@@ -417,12 +419,12 @@ export async function fetchPromocionesFromDb(sedeId?: string): Promise<DbPromoci
       const { data, error } = await query;
       if (error || !data || data.length === 0) return getFallbackDbPromociones();
       const rows = data as DbPromocion[];
-      const missingIds = rows.filter((r) => !r.imagen_webp_url).map((r) => r.id);
+      const missingIds = rows.filter((r) => !r.imagen_webp_url?.trim()).map((r) => r.id);
       if (missingIds.length > 0) {
         const coverMap = await getPrimarySceneCoverMap(missingIds);
         return rows.map((r) => ({
           ...r,
-          imagen_webp_url: r.imagen_webp_url || coverMap[r.id] || '',
+          imagen_webp_url: r.imagen_webp_url?.trim() || coverMap[r.id] || '',
         }));
       }
       return rows;

@@ -26,7 +26,7 @@ const FALLBACK_SLIDES: HeroSlideView[] = HERO_SLIDES.map((s) => ({
   headline: s.headline,
   subtitle: s.subtitle,
   mediaUrl: s.videoUrl,
-  mediaTipo: 'video',
+  mediaTipo: s.videoUrl.endsWith('.mp4') || s.videoUrl.endsWith('.webm') ? 'video' : 'imagen',
   poster: s.poster,
   ctaPrimaryText: s.ctaPrimaryText,
   ctaPrimaryHref: s.ctaPrimaryHref,

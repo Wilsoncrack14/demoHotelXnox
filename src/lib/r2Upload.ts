@@ -235,9 +235,27 @@ export interface R2UploadTarget {
   slug: string;
   kind?: R2MediaKind;
   customName?: string;
+  customFolder?: string;
 }
 
 export type UploadProgressCallback = (percent: number, stage: string) => void;
+
+export function sanitizeR2Folder(rawFolder: string): string {
+  return rawFolder
+    .split('/')
+    .map((seg) =>
+      seg
+        .trim()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9-_]/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '')
+    )
+    .filter(Boolean)
+    .join('/');
+}
 
 export function sanitizeR2Slug(rawName: string, fallback = 'imagen'): string {
   return (
@@ -272,6 +290,13 @@ export function getFileNameFromUrl(mediaUrl: string): string {
   return key.split('/').pop() || '';
 }
 
+export function getFolderPathFromUrl(mediaUrl: string): string {
+  const key = extractR2KeyFromUrl(mediaUrl);
+  if (!key) return '';
+  const lastSlash = key.lastIndexOf('/');
+  return lastSlash >= 0 ? key.slice(0, lastSlash) : '';
+}
+
 async function renameSingleR2Key(oldKey: string, newKey: string): Promise<string> {
   const supaUrl = (import.meta.env.PUBLIC_SUPABASE_URL || 'https://tjmetsamjalxttldhduu.supabase.co').replace(/\/$/, '');
   const anonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || '';
@@ -293,17 +318,19 @@ async function renameSingleR2Key(oldKey: string, newKey: string): Promise<string
 export async function renameR2Media(
   oldUrl: string,
   newName: string,
-  oldThumbUrl?: string | null
+  oldThumbUrl?: string | null,
+  newFolder?: string
 ): Promise<{ newUrl: string; newThumbUrl?: string; newKey: string }> {
   const oldKey = extractR2KeyFromUrl(oldUrl);
   if (!oldKey) throw new Error('No se pudo determinar la ruta del archivo en R2.');
 
   const lastSlash = oldKey.lastIndexOf('/');
-  const folderPrefix = lastSlash >= 0 ? oldKey.slice(0, lastSlash) : '';
+  const currentFolder = lastSlash >= 0 ? oldKey.slice(0, lastSlash) : '';
+  const folderPrefix = newFolder?.trim() ? sanitizeR2Folder(newFolder) : currentFolder;
   const currentFileName = lastSlash >= 0 ? oldKey.slice(lastSlash + 1) : oldKey;
   const extMatch = currentFileName.match(/(\.[a-z0-9]+)$/i);
   const ext = extMatch ? extMatch[1].toLowerCase() : '.webp';
-  const cleanSlug = sanitizeR2Slug(newName);
+  const cleanSlug = newName.trim() ? sanitizeR2Slug(newName) : sanitizeR2Slug(currentFileName);
   const newKey = folderPrefix ? `${folderPrefix}/${cleanSlug}${ext}` : `${cleanSlug}${ext}`;
 
   const newUrl = await renameSingleR2Key(oldKey, newKey);
@@ -313,7 +340,11 @@ export async function renameR2Media(
     const oldThumbKey = extractR2KeyFromUrl(oldThumbUrl);
     if (oldThumbKey && oldThumbKey !== oldKey) {
       const thumbSlash = oldThumbKey.lastIndexOf('/');
-      const thumbFolder = thumbSlash >= 0 ? oldThumbKey.slice(0, thumbSlash) : folderPrefix;
+      const thumbFolder = newFolder?.trim()
+        ? folderPrefix
+        : thumbSlash >= 0
+          ? oldThumbKey.slice(0, thumbSlash)
+          : folderPrefix;
       const newThumbKey = thumbFolder ? `${thumbFolder}/${cleanSlug}-thumb.webp` : `${cleanSlug}-thumb.webp`;
       newThumbUrl = await renameSingleR2Key(oldThumbKey, newThumbKey);
     }
@@ -345,7 +376,9 @@ export async function compressAndUpload360Scene(
 
   let folderPrefix: string;
   if (typeof target === 'string') {
-    folderPrefix = target.replace(/^\/+|\/+$/g, '');
+    folderPrefix = sanitizeR2Folder(target);
+  } else if (target.customFolder?.trim()) {
+    folderPrefix = sanitizeR2Folder(target.customFolder);
   } else {
     const cleanSection = target.section;
     const cleanSlug = target.slug.toLowerCase().replace(/[^a-z0-9-_]/g, '-') || 'general';
@@ -390,12 +423,14 @@ export interface HeroMediaUploadResult {
 export async function uploadHeroMediaToR2(
   file: File,
   onProgress?: UploadProgressCallback,
-  customName?: string
+  customName?: string,
+  customFolder?: string
 ): Promise<HeroMediaUploadResult> {
   const timestamp = Date.now();
   const customSlug = customName?.trim() ? sanitizeR2Slug(customName, 'hero') : '';
   const baseSlug = customSlug || sanitizeR2Slug(file.name, 'hero');
   const fileBase = customSlug ? customSlug : `${timestamp}-${baseSlug}`;
+  const folderPrefix = customFolder?.trim() ? sanitizeR2Folder(customFolder) : 'hero';
 
   const isVideo = file.type.startsWith('video/');
   if (isVideo) {
@@ -404,7 +439,7 @@ export async function uploadHeroMediaToR2(
     }
     onProgress?.(15, 'Preparando video...');
     const ext = file.type === 'video/webm' ? 'webm' : 'mp4';
-    const fileKey = `hero/${fileBase}.${ext}`;
+    const fileKey = folderPrefix ? `${folderPrefix}/${fileBase}.${ext}` : `${fileBase}.${ext}`;
     const supaUrl = (import.meta.env.PUBLIC_SUPABASE_URL || 'https://tjmetsamjalxttldhduu.supabase.co').replace(/\/$/, '');
     const anonKey = import.meta.env.PUBLIC_SUPABASE_ANON_KEY || '';
     const form = new FormData();
@@ -434,7 +469,7 @@ export async function uploadHeroMediaToR2(
   onProgress?.(12, 'Comprimiendo WebP...');
   const compressed = await compressImageTo360WebP(file);
   onProgress?.(35, 'Subiendo a Cloudflare R2...');
-  const mainKey = `hero/${fileBase}.webp`;
+  const mainKey = folderPrefix ? `${folderPrefix}/${fileBase}.webp` : `${fileBase}.webp`;
   const r2Url = await uploadBlobViaPresignedR2(compressed.mainBlob, mainKey, (frac) => {
     onProgress?.(Math.round(35 + frac * 57), 'Subiendo a Cloudflare R2...');
   });
