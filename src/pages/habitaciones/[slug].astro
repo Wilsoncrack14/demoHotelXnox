@@ -1,7 +1,7 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import Navbar from '../../components/Navbar';
-import PanoramaViewer360 from '../../components/PanoramaViewer360';
+import TourViewer360 from '../../components/TourViewer360';
 import LocationBookingCard from '../../components/LocationBookingCard';
 import { ROOMS, type RoomItem } from '../../data/hotelData';
 
@@ -44,9 +44,11 @@ const fullPriceLabel = `${room.priceText} (${room.durationText})`;
 
     <!-- Main 360° Viewport & Thumbnail Carousel -->
     <main class="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-22 md:pt-24">
-      <PanoramaViewer360
-        client:load
+      <TourViewer360
+        client:only="react"
         entityKey={`habitaciones:${room.slug}`}
+        entidadTipo="habitacion"
+        entidadId={room.slug}
         initialScenes={room.scenes}
         showThumbnails={true}
         showCarouselArrows={false}

@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { X, MapPin, Clock, Sparkles, CheckCircle2, ExternalLink } from 'lucide-react';
-import { SEDES, ROOMS, SERVICES, PROMOTIONS, WHATSAPP_PHONE } from '../data/hotelData';
+import { SEDES, ROOMS, SERVICES, PROMOTIONS } from '../data/hotelData';
 import { WhatsAppIcon } from './WhatsAppIcon';
 import type { WhatsAppModalPayload } from '../data/store';
+import { buildWhatsAppBookingUrl } from '../lib/whatsapp';
+import { fetchSedesFromDb, type DbSede } from '../lib/supabase';
 
 export default function WhatsAppBookingModal({
   defaultSede = 'Sede Surco',
@@ -22,6 +24,13 @@ export default function WhatsAppBookingModal({
   const [arrivalTime, setArrivalTime] = useState('En 30 minutos (Ingreso inmediato)');
   const [addOn, setAddOn] = useState('Sin adicionales');
   const [guestNotes, setGuestNotes] = useState('');
+  const [dbSedes, setDbSedes] = useState<DbSede[]>([]);
+
+  useEffect(() => {
+    fetchSedesFromDb().then((rows) => {
+      if (rows && rows.length > 0) setDbSedes(rows);
+    });
+  }, []);
 
   useEffect(() => {
     const handleOpen = (e: Event) => {
@@ -68,19 +77,29 @@ export default function WhatsAppBookingModal({
   };
 
   const buildWhatsAppUrl = () => {
-    const lines = [
-      `✨ *RESERVA DIRECTA — HOTEL XNOX* ✨`,
-      `• *Sede:* ${selectedSede}`,
-      `• *Experiencia:* ${selectedItem}`,
-      `• *Tarifa Ref.:* ${selectedPrice}`,
-      `• *Llegada:* ${arrivalTime}`,
-      addOn !== 'Sin adicionales' ? `• *Adicional:* ${addOn}` : '',
-      guestNotes.trim() ? `• *Nota:* ${guestNotes.trim()}` : '',
-      ``,
-      `Hola Hotel Xnox, deseo confirmar disponibilidad con reserva confidencial.`,
-    ].filter(Boolean);
+    const matchedDbSede = dbSedes.find(
+      (s) =>
+        s.nombre.toLowerCase() === selectedSede.toLowerCase() ||
+        selectedSede.toLowerCase().includes(s.slug.replace('-', ' '))
+    );
 
-    return `https://wa.me/${WHATSAPP_PHONE}?text=${encodeURIComponent(lines.join('\n'))}`;
+    const entidadTipo = selectedItem.toLowerCase().startsWith('promo')
+      ? 'promocion'
+      : selectedItem.toLowerCase().startsWith('servicio')
+      ? 'servicio'
+      : 'habitacion';
+
+    return buildWhatsAppBookingUrl({
+      whatsappNumero: matchedDbSede?.whatsapp_numero,
+      sedeNombre: selectedSede,
+      sedeSlug: matchedDbSede?.slug,
+      entidadNombre: selectedItem,
+      entidadTipo,
+      tarifaTexto: selectedPrice,
+      horaLlegada: arrivalTime,
+      adicionalTexto: addOn,
+      notaCliente: guestNotes,
+    });
   };
 
   return (

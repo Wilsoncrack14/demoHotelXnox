@@ -1,16 +1,53 @@
-import React, { useState } from 'react';
-import { PROMOTIONS } from '../data/hotelData';
+import React, { useState, useEffect } from 'react';
+import { PROMOTIONS, type PromoItem } from '../data/hotelData';
 import { triggerWhatsAppModal } from '../data/store';
+import { fetchPromocionesFromDb, resolveMediaUrl } from '../lib/supabase';
 
 const SEDE_FILTERS = ['Todas', 'Lince', 'Miraflores', 'San Borja', 'Surco', 'Los Olivos'] as const;
 
 export default function PromotionsCatalog() {
   const [selectedSede, setSelectedSede] = useState<string>('Todas');
+  const [promosList, setPromosList] = useState<PromoItem[]>(PROMOTIONS);
+
+  useEffect(() => {
+    fetchPromocionesFromDb().then((dbRows) => {
+      if (!dbRows || dbRows.length === 0) return;
+      const mapped: PromoItem[] = dbRows.map((row) => {
+        const existing = PROMOTIONS.find((p) => p.slug === row.slug);
+        if (existing) {
+          return {
+            ...existing,
+            title: row.titulo || existing.title,
+            promoPrice: `S/ ${row.precio_promo}`,
+            oldPrice: `S/ ${row.precio_regular}`,
+            validUntil: row.fecha_fin || existing.validUntil,
+            cardImage: row.imagen_webp_url ? resolveMediaUrl(row.imagen_webp_url) : existing.cardImage,
+          };
+        }
+        return {
+          slug: row.slug,
+          title: row.titulo,
+          detailHeaderTitle: `${row.titulo} — Promoción Especial`,
+          badgeText: 'PROMO ESPECIAL',
+          sedesLabel: 'Todas las sedes',
+          sedesFilter: ['Lince', 'Miraflores', 'San Borja', 'Surco', 'Los Olivos'],
+          validUntil: row.fecha_fin || '31 Dic 2026',
+          oldPrice: `S/ ${row.precio_regular}`,
+          promoPrice: `S/ ${row.precio_promo}`,
+          cardImage: resolveMediaUrl(row.imagen_webp_url || '/images/promo-noche-romantica.webp'),
+          availabilityTitle: 'Disponible en Todas las Sedes',
+          includesList: [row.descripcion],
+          scenes: PROMOTIONS[0].scenes,
+        };
+      });
+      if (mapped.length > 0) setPromosList(mapped);
+    });
+  }, []);
 
   const filteredPromos =
     selectedSede === 'Todas'
-      ? PROMOTIONS
-      : PROMOTIONS.filter((p) => p.sedesFilter.includes(selectedSede));
+      ? promosList
+      : promosList.filter((p) => p.sedesFilter.includes(selectedSede));
 
   return (
     <section className="mx-auto w-full max-w-[1260px] px-4 md:px-6 pt-24 md:pt-28 pb-20">

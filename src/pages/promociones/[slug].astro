@@ -1,7 +1,7 @@
 ---
 import Layout from '../../layouts/Layout.astro';
 import Navbar from '../../components/Navbar';
-import PanoramaViewer360 from '../../components/PanoramaViewer360';
+import TourViewer360 from '../../components/TourViewer360';
 import LocationBookingCard from '../../components/LocationBookingCard';
 import { PROMOTIONS, type PromoItem } from '../../data/hotelData';
 
@@ -44,9 +44,11 @@ const { promo } = Astro.props;
 
     <main class="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-22 md:pt-24">
       <!-- 360° Viewport & Thumbnail Carousel with Arrows -->
-      <PanoramaViewer360
-        client:load
+      <TourViewer360
+        client:only="react"
         entityKey={`promociones:${promo.slug}`}
+        entidadTipo="servicio"
+        entidadId={promo.id}
         initialScenes={promo.scenes}
         showThumbnails={true}
         showCarouselArrows={true}

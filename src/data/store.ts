@@ -1,6 +1,13 @@
-import { ROOMS, SERVICES, PROMOTIONS, SEDES, type Scene360, type Hotspot360 } from './hotelData';
+import {
+  ROOMS,
+  SERVICES,
+  PROMOTIONS,
+  SEDES,
+  ENTITY_UUID_MAP,
+  type Scene360,
+} from './hotelData';
 
-const STORAGE_KEY = 'hotel_xnox_scenes_v3_real360';
+const STORAGE_KEY = 'hotel_xnox_r2_live_v1';
 
 export type EntityCategory = 'habitaciones' | 'sedes' | 'servicios' | 'promociones';
 
@@ -54,12 +61,15 @@ export function resetEntityScenes(entityKey?: string) {
 
 export function getEntityScenes(entityKey: string, defaultScenes: Scene360[]): Scene360[] {
   const map = getStoredScenesMap();
-  return map[entityKey] && map[entityKey].length > 0 ? map[entityKey] : defaultScenes;
+  return map[entityKey] ? map[entityKey] : defaultScenes;
 }
 
 export interface AdminEditableEntity {
   key: string;
+  entityUuid: string;
+  dbEntidadTipo: 'habitacion' | 'servicio';
   category: EntityCategory;
+  slug: string;
   title: string;
   subtitle: string;
   fullLabel: string;
@@ -70,57 +80,62 @@ export function getAllAdminEntities(): AdminEditableEntity[] {
   const list: AdminEditableEntity[] = [];
 
   for (const room of ROOMS) {
+    const key = `habitaciones:${room.slug}`;
     list.push({
-      key: `habitaciones:${room.slug}`,
+      key,
+      entityUuid: room.id || ENTITY_UUID_MAP[key],
+      dbEntidadTipo: 'habitacion',
       category: 'habitaciones',
+      slug: room.slug,
       title: room.title,
       subtitle: room.sedeName,
       fullLabel: `${room.title} — ${room.sedeName}`,
-      defaultScenes: room.scenes,
+      defaultScenes: [],
     });
   }
 
   for (const sede of SEDES) {
+    const key = `sedes:${sede.slug}`;
     list.push({
-      key: `sedes:${sede.slug}`,
+      key,
+      entityUuid: sede.id || ENTITY_UUID_MAP[key],
+      dbEntidadTipo: 'habitacion',
       category: 'sedes',
+      slug: sede.slug,
       title: sede.name,
       subtitle: sede.address,
       fullLabel: `${sede.name} — Exterior & Recepción`,
-      defaultScenes: [
-        {
-          id: `sede-${sede.slug}-1`,
-          title: 'Ingreso & Recepción 360°',
-          adminTitle: 'Ingreso & Recepción',
-          isPrimary: true,
-          fileSizeWebP: '1.3 MB WebP',
-          panoramaUrl: sede.panoramaUrl,
-          thumbUrl: '/images/thumb-ingreso.webp',
-          hotspots: sede.hotspots,
-        },
-      ],
+      defaultScenes: [],
     });
   }
 
   for (const serv of SERVICES) {
+    const key = `servicios:${serv.slug}`;
     list.push({
-      key: `servicios:${serv.slug}`,
+      key,
+      entityUuid: serv.id || ENTITY_UUID_MAP[key],
+      dbEntidadTipo: 'servicio',
       category: 'servicios',
+      slug: serv.slug,
       title: serv.title,
       subtitle: serv.topBarPriceText,
       fullLabel: `${serv.title} — Servicios`,
-      defaultScenes: serv.scenes,
+      defaultScenes: [],
     });
   }
 
   for (const promo of PROMOTIONS) {
+    const key = `promociones:${promo.slug}`;
     list.push({
-      key: `promociones:${promo.slug}`,
+      key,
+      entityUuid: promo.id || ENTITY_UUID_MAP[key],
+      dbEntidadTipo: 'servicio',
       category: 'promociones',
+      slug: promo.slug,
       title: promo.title,
       subtitle: promo.badgeText,
       fullLabel: `${promo.title} — Promoción (${promo.badgeText})`,
-      defaultScenes: promo.scenes,
+      defaultScenes: [],
     });
   }
 

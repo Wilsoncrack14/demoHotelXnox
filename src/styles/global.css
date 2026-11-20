@@ -93,3 +93,16 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #3F3F46;
 }
+
+@keyframes xnox-wave-slide {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-xnox-wave {
+  animation: xnox-wave-slide 2.2s linear infinite;
+}

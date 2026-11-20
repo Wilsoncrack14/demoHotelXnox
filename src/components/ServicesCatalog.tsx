@@ -1,19 +1,59 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { RotateCw, ArrowRight } from 'lucide-react';
 import { SERVICES, type ServiceItem } from '../data/hotelData';
+import { fetchServiciosFromDb, resolveMediaUrl } from '../lib/supabase';
 
 const CATEGORIES = ['Todas', 'Jacuzzi', 'Sillón Tántrico', 'Decoraciones', 'Packs'] as const;
 
 export default function ServicesCatalog() {
   const [selectedCategory, setSelectedCategory] = useState<string>('Todas');
+  const [servicesList, setServicesList] = useState<ServiceItem[]>(SERVICES);
 
-  const featuredService = SERVICES[0]; // Packs de Decoración & Celebraciones
-  const gridServices = SERVICES.slice(1); // The 4 cards on the 2x2 grid
+  useEffect(() => {
+    fetchServiciosFromDb().then((dbRows) => {
+      if (!dbRows || dbRows.length === 0) return;
+      // Map any custom DB rows while keeping rich template properties if slug matches
+      const mapped: ServiceItem[] = dbRows.map((row, idx) => {
+        const existing = SERVICES.find((s) => s.slug === row.slug);
+        if (existing) {
+          return {
+            ...existing,
+            title: row.nombre || existing.title,
+            description: row.descripcion || existing.description,
+            priceText: `S/ ${row.tarifa}`,
+            cardImage: row.portada_webp_url ? resolveMediaUrl(row.portada_webp_url) : existing.cardImage,
+          };
+        }
+        return {
+          slug: row.slug,
+          title: row.nombre,
+          category: (row.etiqueta_promo as ServiceItem['category']) || 'Packs',
+          priceText: `S/ ${row.tarifa}`,
+          topBarPriceText: `Desde S/ ${row.tarifa}`,
+          description: row.descripcion,
+          sedesBadges: ['Todas las sedes'],
+          sedesFilter: ['Surco', 'Lince', 'Miraflores', 'San Borja', 'Los Olivos'],
+          availabilityTitle: 'Disponible en Todas las Sedes',
+          address: 'Av. Benavides 4510, Surco',
+          featuredTall: idx === 0,
+          has360Badge: true,
+          cardImage: resolveMediaUrl(row.portada_webp_url || '/images/service-jacuzzi.webp'),
+          amenitiesTitle: 'Equipamiento:',
+          amenities: [row.descripcion],
+          scenes: SERVICES[0].scenes,
+        };
+      });
+      if (mapped.length > 0) setServicesList(mapped);
+    });
+  }, []);
+
+  const featuredService = servicesList[0] || SERVICES[0]; // Packs de Decoración & Celebraciones
+  const gridServices = servicesList.slice(1); // The 4 cards on the 2x2 grid
 
   const filteredServices =
     selectedCategory === 'Todas'
-      ? SERVICES
-      : SERVICES.filter((s) => s.category === selectedCategory);
+      ? servicesList
+      : servicesList.filter((s) => s.category === selectedCategory);
 
   return (
     <section className="mx-auto w-full max-w-[1400px] px-4 md:px-6 pt-24 md:pt-28 pb-20">

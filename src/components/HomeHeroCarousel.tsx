@@ -1,52 +1,117 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { HERO_SLIDES } from '../data/hotelData';
+import { fetchHeroSlidesFromDb, resolveMediaUrl } from '../lib/supabase';
+
+interface HeroSlideView {
+  id: string | number;
+  headline: string;
+  subtitle: string;
+  etiquetaSuperior?: string;
+  mediaUrl: string;
+  mediaTipo: 'imagen' | 'video';
+  poster?: string;
+  ctaPrimaryText: string;
+  ctaPrimaryHref: string;
+  ctaSecondaryText: string;
+  ctaSecondaryHref: string;
+}
+
+const FALLBACK_SLIDES: HeroSlideView[] = HERO_SLIDES.map((s) => ({
+  id: s.id,
+  headline: s.headline,
+  subtitle: s.subtitle,
+  mediaUrl: s.videoUrl,
+  mediaTipo: 'video',
+  poster: s.poster,
+  ctaPrimaryText: s.ctaPrimaryText,
+  ctaPrimaryHref: s.ctaPrimaryHref,
+  ctaSecondaryText: s.ctaSecondaryText,
+  ctaSecondaryHref: s.ctaSecondaryHref,
+}));
 
 export default function HomeHeroCarousel() {
+  const [slides, setSlides] = useState<HeroSlideView[]>(FALLBACK_SLIDES);
   const [activeIndex, setActiveIndex] = useState(0);
   const videoRefs = useRef<(HTMLVideoElement | null)[]>([]);
 
   useEffect(() => {
+    fetchHeroSlidesFromDb().then((dbRows) => {
+      if (!dbRows || dbRows.length === 0) return;
+      const mapped: HeroSlideView[] = dbRows.map((row) => ({
+        id: row.id,
+        headline: row.titulo,
+        subtitle: row.subtitulo || '',
+        etiquetaSuperior: row.etiqueta_superior || undefined,
+        mediaUrl: resolveMediaUrl(row.media_url),
+        mediaTipo: row.media_tipo || 'imagen',
+        ctaPrimaryText: row.boton_texto || 'Explorar 360°',
+        ctaPrimaryHref: row.boton_url || '/habitaciones',
+        ctaSecondaryText: 'Ver Habitaciones',
+        ctaSecondaryHref: '/sedes/surco',
+      }));
+      setSlides(mapped);
+      setActiveIndex(0);
+    });
+  }, []);
+
+  useEffect(() => {
+    const activeSlide = slides[activeIndex];
     videoRefs.current.forEach((video, idx) => {
       if (!video) return;
-      if (idx === activeIndex) {
+      if (idx === activeIndex && activeSlide?.mediaTipo === 'video') {
         video.currentTime = 0;
         video.play().catch(() => {});
       } else {
         video.pause();
       }
     });
-  }, [activeIndex]);
+
+    if (activeSlide?.mediaTipo === 'imagen' && slides.length > 1) {
+      const timer = setTimeout(() => {
+        setActiveIndex((prev) => (prev + 1) % slides.length);
+      }, 6500);
+      return () => clearTimeout(timer);
+    }
+  }, [activeIndex, slides]);
 
   const handleVideoEnded = () => {
-    setActiveIndex((prev) => (prev + 1) % HERO_SLIDES.length);
+    setActiveIndex((prev) => (prev + 1) % slides.length);
   };
 
-  const current = HERO_SLIDES[activeIndex];
+  const current = slides[activeIndex] || slides[0];
   const formattedIndex = String(activeIndex + 1).padStart(2, '0');
-  const formattedTotal = String(HERO_SLIDES.length).padStart(2, '0');
+  const formattedTotal = String(slides.length).padStart(2, '0');
 
   return (
     <section className="relative w-full h-screen min-h-[700px] overflow-hidden select-none bg-[#09090B]">
-      {/* Background Video Slides */}
-      {HERO_SLIDES.map((slide, idx) => (
+      {/* Background Video / Image Slides */}
+      {slides.map((slide, idx) => (
         <div
           key={slide.id}
           className={`absolute inset-0 transition-opacity duration-700 ${
             idx === activeIndex ? 'opacity-100 z-10' : 'opacity-0 z-0 pointer-events-none'
           }`}
         >
-          <video
-            ref={(el) => {
-              videoRefs.current[idx] = el;
-            }}
-            src={slide.videoUrl}
-            poster={slide.poster}
-            autoPlay={idx === 0}
-            muted
-            playsInline
-            onEnded={handleVideoEnded}
-            className="w-full h-full object-cover object-center"
-          />
+          {slide.mediaTipo === 'video' ? (
+            <video
+              ref={(el) => {
+                videoRefs.current[idx] = el;
+              }}
+              src={slide.mediaUrl}
+              poster={slide.poster}
+              autoPlay={idx === 0}
+              muted
+              playsInline
+              onEnded={handleVideoEnded}
+              className="w-full h-full object-cover object-center"
+            />
+          ) : (
+            <img
+              src={slide.mediaUrl}
+              alt={slide.headline}
+              className="w-full h-full object-cover object-center"
+            />
+          )}
 
           {/* Top neon ambient glow behind floating glass navbar + left readability gradient + bottom obsidian blend */}
           <div
@@ -62,6 +127,12 @@ export default function HomeHeroCarousel() {
       {/* Content Overlay — Optimized for 27" Desktop (1080p / 1440p QHD / 4K) */}
       <div className="relative z-20 mx-auto w-full max-w-[1840px] h-full px-6 sm:px-12 md:px-20 lg:px-28 xl:px-36 2xl:px-44 pt-20 pb-20 flex flex-col justify-center">
         <div className="max-w-3xl -mt-4 xl:-mt-8">
+          {current.etiquetaSuperior && (
+            <span className="inline-block mb-3 px-3.5 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-xs uppercase tracking-[0.14em] text-[#FAFAFA]">
+              {current.etiquetaSuperior}
+            </span>
+          )}
+
           <h1
             className="font-light uppercase text-[#FAFAFA] whitespace-pre-line tracking-[-0.015em] leading-[1.04]"
             style={{
@@ -107,16 +178,16 @@ export default function HomeHeroCarousel() {
         </div>
       </div>
 
-      {/* Video Carousel Indicator & Counter (01 / 02) */}
+      {/* Carousel Indicator & Counter */}
       <div className="absolute bottom-10 xl:bottom-12 inset-x-0 z-20 flex flex-col items-center justify-center gap-3">
         <div className="flex items-center gap-3">
-          {HERO_SLIDES.map((slide, idx) => {
+          {slides.map((slide, idx) => {
             const isActive = idx === activeIndex;
             return (
               <button
                 key={slide.id}
                 type="button"
-                aria-label={`Video ${idx + 1}`}
+                aria-label={`Slide ${idx + 1}`}
                 onClick={() => setActiveIndex(idx)}
                 className={`rounded-full transition-all cursor-pointer ${
                   isActive
